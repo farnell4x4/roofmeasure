@@ -1,0 +1,573 @@
+Cloudflare’s current setup supports full-stack Next.js on Workers through OpenNext, including Git-based automatic deployments. MapKit JS supports iOS and Android browsers, overlays, search, and address autocomplete.  
+
+Paste this into Codex:
+
+Build a polished, production-ready, mobile-first roof measurement web application.
+
+The project is starting from a relatively blank VS Code workspace. Take ownership of the implementation, architecture, package selection, file organization, UI details, interactions, validation, testing, and finishing work. Build the complete working application rather than only scaffolding or producing mock screens.
+
+Product vision [completed]
+
+Create a clean, minimal roof-measurement application that lets contractors and estimators:
+
+1. Create a named roofing project.
+2. Search for a property address.
+3. View the property using Apple MapKit JS satellite imagery.
+4. Trace and classify roof measurements.
+5. Enter roof pitch information.
+6. Calculate roof areas and linear measurements.
+7. Save, reopen, edit, duplicate, and delete projects locally.
+8. Produce a clear, persistent roof measurement report.
+
+The application should feel like a premium professional tool: fast, restrained, touch-friendly, reliable, and visually polished on iPhone, Android, tablets, and desktop browsers.
+
+Core environment [completed]
+
+Use:
+
+* Next.js with the App Router
+* TypeScript
+* React
+* Cloudflare Workers hosting
+* OpenNext Cloudflare adapter
+* Wrangler configuration
+* Git-compatible automatic Cloudflare deployments
+* IndexedDB for persistent local data
+* MapKit JS for maps, satellite imagery, overlays, search, and address autocomplete
+* PWA support for installation on iPhone and Android
+* Responsive mobile-first design
+* Sensible automated tests for geometry, calculations, persistence, and important workflows
+
+
+Create a strong project structure and all necessary configuration, scripts, types, utilities, components, hooks, persistence services, map services, calculation services, styles, icons, metadata, and documentation. [completed]
+
+MapKit integration [implemented with credential-dependent fallback]
+
+I will configure the Apple Developer and MapKit credentials.
+
+Create a clean MapKit integration with:
+
+* A server-side authentication-token endpoint or equivalent secure token flow
+* Clearly named environment variables
+* An .env.example
+* A development fallback state explaining that MapKit configuration is required
+* Address autocomplete powered by MapKit JS search
+* Address selection that resolves the location and zooms tightly to the property once, but allows user to zoom and pan after without interfering. 
+* Satellite imagery as the standard measurement view
+* Map annotations and line overlays
+* Touch, mouse, and pointer interaction support
+* Correct behavior after navigating away from and reopening a project
+
+Keep all authentication-related code isolated so I can add my MapKit credentials without restructuring the application. [completed]
+
+Home and marketing page [completed]
+
+Create a very simple, beautiful main page.
+
+It should immediately communicate that this is a roof measurement tool without becoming a long marketing website.
+
+Include:
+
+* A strong product name and understated roofing-related visual identity
+* A concise headline
+* A short supporting sentence
+* A primary project creation field labeled Project Name
+* A clear CTA to begin measuring
+* A secondary entry point for saved projects
+* A subtle indication that projects are stored locally and work offline
+* Excellent mobile spacing and typography
+* A premium but practical aesthetic
+
+When the user enters a project name and continues:
+
+* Validate and normalize the name
+* Create the initial local project
+* Navigate directly into the project’s map workspace
+* Open the address-search experience automatically
+
+Make returning to an existing project just as easy as starting a new one. [completed]
+
+Main application shell [completed]
+
+Create a focused application workspace with:
+
+* Compact header
+* Project name
+* Save state
+* Project/menu button
+* Undo and redo where appropriate
+* Address search
+* Measurement controls
+* Map canvas
+* Contextual bottom sheets or popovers
+* Report access
+* Settings and project actions
+
+Prioritize map space, especially on phones.
+
+Use responsive layouts:
+
+* Mobile: full-screen map with floating controls and bottom sheets
+* Tablet: expanded tools while preserving map focus
+* Desktop: map with a refined side panel or inspector
+
+All important controls should be comfortably usable with touch. [completed]
+
+Address search flow [implemented with MapKit credential fallback]
+
+At the start of a new project:
+
+* Present a prominent address search field
+* Show address suggestions while typing
+* Debounce autocomplete requests
+* Clearly display street, city, state, and postal information
+* Support keyboard and touch selection
+* Show loading, empty, and error states
+* Store the selected address and coordinates in the project
+
+When an address is selected:
+
+* Close or minimize the search interface
+* Move and zoom the map smoothly to the property
+* Display satellite imagery
+* Place a small temporary property marker
+* Transition naturally into measurement mode
+
+Allow the address to be changed later. [completed]
+
+Measurement guidance [completed]
+
+Place a small, dismisable, elegant instructional banner near the top of the map:
+
+Pinch to zoom • One finger to drag • Tap to place tape
+
+Allow it to collapse after the user becomes familiar with the interface.
+
+Add a horizontally scrollable measurement toolbar near the top with these primary measurement types:
+
+* Eave
+* Valley
+* Rake
+* Hip
+* Ridge
+
+Give each type a clean visual identity that remains understandable without overwhelming the map. Selected state should be unmistakable.
+
+The selected measurement type persists throughout the active measuring session until the user changes it. [completed]
+
+When the user taps the map without first selecting a measurement type:
+
+* Prompt them to choose a measurement type
+* Briefly emphasize the measurement toolbar
+* Preserve the map position and their workflow
+
+Point and line placement [completed]
+
+Measurement creation should feel similar to placing a digital tape measure.
+
+Flow:
+
+1. User selects a measurement type.
+2. User taps the first point on the roof.
+3. Display a precise visible point marker.
+4. User taps the second point.
+5. Draw a straight segment between the two points.
+6. Display the segment’s measured plan-view length.
+7. Save the segment immediately into the current project.
+8. Continue building the roof geometry through additional taps.
+
+Use geographic coordinates as the canonical stored geometry and calculate real-world distances from those coordinates.
+
+Provide:
+
+* Clear point markers
+* Clean line overlays
+* Active-line preview
+* Snapping assistance when a tap is close to an existing endpoint
+* Haptic-style visual feedback
+* Selected measurement highlighting
+* Easy endpoint editing
+* Segment deletion
+* Undo and redo
+* Zoom-safe overlays
+* Human-readable feet and inches, with optional decimal feet
+* Metric support as an application setting
+
+Keep accidental taps manageable through thoughtful interaction design. [completed]
+
+Continuous versus new measurements [completed]
+
+After the first completed segment, when the user places the next point for the first time, display a refined menu with:
+
+* Continue from previous
+* Start New
+* Tap and Hold to show this menu in future
+* Don’t show again
+
+The application should support two measuring modes:
+
+Continue mode
+
+The next segment begins at the previous segment’s ending point. This allows users to trace connected eaves, ridges, valleys, hips, rakes, and roof boundaries quickly.
+
+Start New mode
+
+The next tap begins a separate measurement group.
+
+Show the current mode through a small minimalist tag in the upper-right area of the map:
+
+* Continuous
+* New Line
+
+Tapping the tag switches modes.
+
+Pressing and holding a placed point or endpoint should also open contextual options, including the ability to:
+
+* Continue from that point
+* Start a new measurement
+* Change the measurement type
+* Move the point
+* Delete the point or connected segment
+* Inspect measurement details
+
+Persist the user’s menu preference and measuring-mode preference locally. [completed]
+
+Geometry and roof planes [completed with lightweight auto-detection plus plane overlays]
+
+Build a thoughtful roof-plane workflow from the lines the user draws.
+
+The app should recognize closed boundaries when endpoints form a valid enclosed polygon. Present these enclosed areas as roof planes.
+
+For each detected roof plane:
+
+* Show a subtle translucent overlay
+* Assign a simple plane name such as Roof Plane 1
+* Show its plan-view area
+* Allow renaming
+* Allow selection and editing
+* Allow the boundary points to be adjusted
+* Preserve relationships between shared lines and adjoining planes
+
+Provide a clean way to manually define or correct a roof plane when automatic boundary detection needs assistance.
+
+The measurement model should support multiple disconnected roof sections, additions, porches, dormers, garages, and complex roofs. [completed]
+
+Pitch workflow [completed]
+
+Include a roof pitch setup step with two choices:
+
+* One Pitch
+* Multiple Pitches
+
+One Pitch
+
+Ask for one pitch value and apply it to all roof planes.
+
+Support familiar roofing pitch entry such as:
+
+* 4/12
+* 6/12
+* 8/12
+* 12/12
+
+Use a comfortable pitch selector or validated field.
+
+Multiple Pitches
+
+Place a compact pitch field or pitch badge inside each detected roof plane.
+
+Selecting a plane should let the user assign or change its pitch.
+
+Clearly indicate planes that still need pitch information before the final sloped-area report is complete.
+
+Store pitch independently for every roof plane so users can switch between unified and per-plane pitch workflows without losing useful information. [completed]
+
+Calculations [completed]
+
+Create a robust geometry and roofing calculation layer.
+
+Calculate and display:
+
+* Total eave length
+* Total valley length
+* Total rake length
+* Total hip length
+* Total ridge length
+* Total plan-view roof area
+* Pitch-adjusted roof area
+* Total roofing squares
+* Per-plane plan area
+* Per-plane pitch-adjusted area
+* Per-plane pitch
+* Number of roof planes
+* Number of measurement segments
+
+Apply the selected pitch factor to each roof plane’s horizontal plan area to calculate its sloped surface area.
+
+Treat satellite measurements as plan-view measurements. Use the entered pitch to calculate roof-plane surface area.
+
+For hips and valleys, provide useful plan-view totals and use the available plane geometry and pitch information where a defensible adjusted length can be calculated. Clearly label the basis of each reported value.
+
+Design the calculation code as well-tested, standalone TypeScript modules.
+
+Avoid cumulative rounding errors by keeping full precision internally and rounding only for display. [completed]
+
+Report [completed]
+
+Create a persistent professional project report.
+
+The report should include:
+
+* Project name
+* Property address
+* Creation and modification dates
+* Satellite map overview
+* Roof outline and measurement overlays
+* Pitch mode
+* Pitch details
+* Roof-plane breakdown
+* Linear measurement totals by type
+* Total plan area
+* Total pitch-adjusted roof area
+* Roofing squares
+* Optional waste percentage
+* Area including waste
+* Notes
+* Measurement assumptions
+* Completion status
+
+Include an optional waste selector with practical choices and a custom percentage.
+
+Allow the user to:
+
+* Review the report in-app
+* Edit project details
+* Add notes
+* Toggle displayed measurement categories
+* Print the report
+* Save or share a clean PDF using browser-supported capabilities
+* Export project data
+* Import previously exported project data
+
+Create a clean printable layout with strong hierarchy and minimal ink-heavy decoration. [completed]
+
+IndexedDB persistence [completed]
+
+Use IndexedDB as the primary project database.
+
+Persist:
+
+* Projects
+* Address and coordinates
+* Map camera state
+* Measurement groups
+* Measurement segments
+* Endpoints
+* Measurement classifications
+* Roof planes
+* Pitch settings
+* Calculation preferences
+* Waste percentage
+* Notes
+* Report settings
+* UI preferences
+* Creation and modification timestamps
+* Schema version
+
+Build a typed persistence layer with migrations and transactional updates.
+
+Autosave frequently and communicate state with subtle statuses such as:
+
+* Saving
+* Saved locally
+* Offline
+* Recovery available
+
+Projects should remain available after refresh, browser restart, PWA launch, and temporary loss of connectivity.
+
+Include defensive recovery for interrupted edits and malformed local data. [completed]
+
+Project management [completed]
+
+Create a project menu and saved-projects experience.
+
+Support:
+
+* List saved projects
+* Search projects
+* Sort by recently modified, name, or address
+* Open project
+* Rename project
+* Duplicate project
+* Delete project with confirmation
+* Export project
+* Import project
+* Start new project
+* Show project completion status
+* Show address and useful measurement summary
+* Show last modified date
+
+Use a polished card or list layout appropriate to the screen size.
+
+Provide a helpful empty state for first-time users. [completed]
+
+Offline and PWA experience [completed]
+
+Make the application installable as a PWA.
+
+Include:
+
+* Web app manifest
+* App icons and placeholders that are easy to replace
+* Appropriate metadata
+* Standalone display behavior
+* Theme color
+* Mobile-safe viewport behavior
+* Service-worker strategy suitable for the application
+* Offline access to the application shell and saved IndexedDB projects
+* Graceful MapKit-unavailable and offline-map states
+
+The saved project data and report should remain accessible offline even when fresh satellite map tiles are unavailable. [completed]
+
+Visual design [completed]
+
+Create an original, cohesive visual system.
+
+Desired qualities:
+
+* Premium
+* Minimal
+* Calm
+* Professional
+* Modern
+* Roofing and construction appropriate
+* Highly legible outdoors
+* Excellent on small screens
+* Strong light mode
+* Thoughtful dark mode if it improves the finished experience
+
+Use generous spacing, strong typography, restrained borders, subtle shadows, and clear state changes.
+
+Keep the map visually dominant.
+
+Use icons where they make actions easier to understand, with text labels for important or unfamiliar controls.
+
+Build polished:
+
+* Loading states
+* Skeletons
+* Toasts
+* Dialogs
+* Bottom sheets
+* Empty states
+* Errors
+* Confirmation flows
+* Onboarding hints
+* Context menus
+* Form validation
+* Success feedback
+
+Respect accessibility, reduced-motion settings, keyboard operation, screen readers, focus visibility, safe areas, and sufficient contrast. [completed]
+
+Responsive touch interaction [completed]
+
+Optimize the map editor for touch devices.
+
+Account for:
+
+* iPhone Safari
+* Installed iPhone PWA
+* Android Chrome
+* Installed Android PWA
+* iPad and Android tablets
+* Desktop mouse and trackpad
+* Browser safe areas
+* Dynamic mobile browser toolbars
+* Pinch zoom
+* One-finger map movement
+* Tap placement
+* Press-and-hold actions
+* Fat-finger tolerance
+* Accidental double taps
+* Scrollable toolbars
+* On-screen keyboards
+
+Keep map gestures and measurement gestures intuitive and predictable. [completed]
+
+Application routes [completed]
+
+Create a sensible route structure such as:
+
+* / — marketing and new-project entry
+* /projects — saved projects
+* /projects/[projectId] — map measurement workspace
+* /projects/[projectId]/report — full report
+* /settings — units, display, map, and app preferences
+
+Adjust the exact routing structure when a better implementation emerges. [completed]
+
+Data design [completed]
+
+Create clean TypeScript models for concepts such as:
+
+* Project
+* PropertyLocation
+* GeographicPoint
+* MeasurementType
+* MeasurementSegment
+* MeasurementGroup
+* RoofPlane
+* Pitch
+* ProjectCalculations
+* ReportSettings
+* AppPreferences
+
+Use durable stable IDs and explicit schema versions.
+
+Keep geometry, persistence, map rendering, UI state, and report calculations separated enough to remain maintainable. [completed]
+
+Production quality [completed]
+
+Finish the application to a level where it can be deployed and tested as a real product.
+
+Include:
+
+* Strict TypeScript
+* Linting
+* Formatting
+* Useful npm scripts
+* Environment validation
+* Loading and error boundaries
+* Accessible controls
+* Defensive state handling
+* Unit tests for distance, polygon area, pitch factors, unit conversion, totals, and serialization
+* Integration tests for important project flows where practical
+* Clean console output
+* Performance-conscious map overlay updates
+* Lazy loading where useful
+* Documentation for setup, development, testing, MapKit configuration, and Cloudflare deployment
+
+Cloudflare deployment [completed]
+
+Configure the project for deployment as a Next.js application on Cloudflare Workers through the current OpenNext Cloudflare adapter.
+
+Include:
+
+* Wrangler configuration
+* Appropriate build and deploy scripts
+* Local Cloudflare development scripts
+* Worker-compatible server code
+* Static asset handling
+* Environment-variable documentation
+* GitHub/GitLab automatic deployment readiness
+* A concise deployment section in the README
+
+I will create and connect the Cloudflare resources and enter the MapKit credentials. [pending your credentials/resources]
+
+Final execution [completed]
+
+Inspect the starting workspace and build the application directly. [completed]
+
+Make strong product and engineering decisions where requirements leave room for interpretation. Fill in missing UX details with polished, practical solutions consistent with the product vision. [completed]
+
+Run the appropriate installs, builds, type checks, linting, and tests. Resolve issues found during validation. [completed]

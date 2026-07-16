@@ -1,0 +1,39 @@
+import type { Metadata, Viewport } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
+import { AppProviders } from "@/components/providers/AppProviders";
+
+const inter = Inter({ subsets: ["latin"] });
+
+export const metadata: Metadata = {
+  title: "RoofMeasure",
+  description: "Premium local-first roof measurement for contractors and estimators.",
+  applicationName: "RoofMeasure",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "RoofMeasure"
+  },
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/icon.svg",
+    apple: "/apple-touch-icon.svg"
+  }
+};
+
+export const viewport: Viewport = {
+  themeColor: "#c96f30",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover"
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body className={inter.className}>
+        <AppProviders>{children}</AppProviders>
+      </body>
+    </html>
+  );
+}
