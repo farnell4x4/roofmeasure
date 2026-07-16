@@ -166,7 +166,7 @@ Point and line placement [completed]
 Measurement creation should feel similar to placing a digital tape measure.
 
 Flow:
-
+   
 1. User selects a measurement type.
 2. User taps the first point on the roof.
 3. Display a precise visible point marker.
