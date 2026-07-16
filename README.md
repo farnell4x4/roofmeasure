@@ -41,6 +41,20 @@ npm run lint
 npm run test
 ```
 
+## VS Code restart helper
+
+Use `Cmd+Shift+P` in VS Code, run `Tasks: Run Task`, then choose `RoofMeasure: Restart Dev + Refresh Safari`.
+
+That task:
+
+- stops the existing local dev server if one is running
+- starts `npm run dev` again in a real Terminal session so the process stays alive
+- waits for `http://127.0.0.1:3000`
+- activates Safari
+- reloads an existing tab already on that URL or on `http://localhost:3000`, or opens a new tab if none exists
+
+The script lives at [scripts/restart-dev-and-refresh-safari.sh](/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/scripts/restart-dev-and-refresh-safari.sh), and the VS Code task is in [.vscode/tasks.json](/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.vscode/tasks.json).
+
 ## Environment variables
 
 | Variable | Required | Purpose |
