@@ -3257,7 +3257,7 @@
       "format": "cjs"
     },
     ".open-next/server-functions/default/node_modules/next/dist/server/load-manifest.external.js": {
-      "bytes": 56216,
+      "bytes": 56214,
       "imports": [
         {
           "path": "path",
@@ -4174,8 +4174,8 @@
       ],
       "format": "cjs"
     },
-    ".open-next/server-functions/default/.next/server/app/settings/page.js": {
-      "bytes": 28861,
+    ".open-next/server-functions/default/.next/server/app/projects/page.js": {
+      "bytes": 24487,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -4240,8 +4240,8 @@
       ],
       "format": "cjs"
     },
-    ".open-next/server-functions/default/.next/server/app/projects/page.js": {
-      "bytes": 24487,
+    ".open-next/server-functions/default/.next/server/app/settings/page.js": {
+      "bytes": 28861,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -4857,14 +4857,14 @@
           "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/_not-found/page.js"
         },
         {
-          "path": ".open-next/server-functions/default/.next/server/app/settings/page.js",
-          "kind": "require-call",
-          "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/settings/page.js"
-        },
-        {
           "path": ".open-next/server-functions/default/.next/server/app/projects/page.js",
           "kind": "require-call",
           "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/projects/page.js"
+        },
+        {
+          "path": ".open-next/server-functions/default/.next/server/app/settings/page.js",
+          "kind": "require-call",
+          "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/settings/page.js"
         },
         {
           "path": ".open-next/server-functions/default/.next/server/app/offline/page.js",
@@ -6962,7 +6962,7 @@
           "bytesInOutput": 6509
         },
         ".open-next/server-functions/default/node_modules/next/dist/server/load-manifest.external.js": {
-          "bytesInOutput": 45835
+          "bytesInOutput": 45833
         },
         ".open-next/server-functions/default/node_modules/next/dist/server/app-render/action-async-storage-instance.js": {
           "bytesInOutput": 501
@@ -7063,11 +7063,11 @@
         ".open-next/server-functions/default/.next/server/app/_not-found/page.js": {
           "bytesInOutput": 18751
         },
-        ".open-next/server-functions/default/.next/server/app/settings/page.js": {
-          "bytesInOutput": 29551
-        },
         ".open-next/server-functions/default/.next/server/app/projects/page.js": {
           "bytesInOutput": 24976
+        },
+        ".open-next/server-functions/default/.next/server/app/settings/page.js": {
+          "bytesInOutput": 29551
         },
         ".open-next/server-functions/default/.next/server/app/offline/page.js": {
           "bytesInOutput": 19472
@@ -7235,7 +7235,7 @@
           "bytesInOutput": 58961
         }
       },
-      "bytes": 2921307
+      "bytes": 2921305
     }
   }
 }
