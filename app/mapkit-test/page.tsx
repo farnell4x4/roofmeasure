@@ -57,16 +57,29 @@ function stringifyError(value: unknown) {
   }
 }
 
+function stringifyJson(value: unknown) {
+  if (typeof value === "undefined") return "undefined";
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return stringifyError(value);
+  }
+}
+
 export default function MapKitTestPage() {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<unknown>(null);
   const [statuses, setStatuses] = useState(INITIAL_STATUSES);
   const [events, setEvents] = useState<string[]>([]);
   const [tokenPreview, setTokenPreview] = useState<string>("");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState("1600 Amphitheatre Parkway, Mountain View, CA");
   const [searchState, setSearchState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [searchMessage, setSearchMessage] = useState("Type an address and press Enter.");
   const [firstResult, setFirstResult] = useState<string>("");
+  const [searchErrorLog, setSearchErrorLog] = useState("No search callback yet.");
+  const [searchDataLog, setSearchDataLog] = useState("No search callback yet.");
+  const [searchPlacesLog, setSearchPlacesLog] = useState("No search callback yet.");
 
   useEffect(() => {
     let cancelled = false;
@@ -211,7 +224,7 @@ export default function MapKitTestPage() {
     };
   }, []);
 
-  async function handleSearchSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function handleSearchSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const normalizedQuery = query.trim();
@@ -222,41 +235,77 @@ export default function MapKitTestPage() {
       setSearchState("error");
       setSearchMessage("MapKit Search is unavailable on window.mapkit.");
       setFirstResult("");
+      setSearchErrorLog("MapKit Search is unavailable on window.mapkit.");
+      setSearchDataLog("undefined");
+      setSearchPlacesLog("undefined");
       return;
     }
 
-    try {
-      setSearchState("loading");
-      setSearchMessage(`Searching for "${normalizedQuery}"...`);
-      setFirstResult("");
+    setSearchState("loading");
+    setSearchMessage(`Searching for "${normalizedQuery}"...`);
+    setFirstResult("");
+    setSearchErrorLog("Waiting for callback...");
+    setSearchDataLog("Waiting for callback...");
+    setSearchPlacesLog("Waiting for callback...");
 
-      const search = new mapkitWindow.mapkit.Search({ language: "en" });
-      const response = await search.search(normalizedQuery, {
+    const search = new mapkitWindow.mapkit.Search({ language: "en" }) as {
+      search: (
+        query: string,
+        callback: (error: unknown, data: { places?: Array<Record<string, unknown>> } | null) => void,
+        options?: Record<string, unknown>
+      ) => Promise<unknown>;
+    };
+
+    try {
+      void search.search(
+        normalizedQuery,
+        (error, data) => {
+          console.log("error:", error);
+          console.log("data:", data);
+          console.log("places:", data?.places);
+
+          setSearchErrorLog(stringifyJson(error));
+          setSearchDataLog(stringifyJson(data));
+          setSearchPlacesLog(stringifyJson(data?.places));
+
+          if (error) {
+            setSearchState("error");
+            setSearchMessage(`Search callback returned an error for "${normalizedQuery}".`);
+            setFirstResult("");
+            return;
+          }
+
+          const place = data?.places?.[0];
+          if (!place) {
+            setSearchState("success");
+            setSearchMessage("Search callback completed, but data.places was empty.");
+            setFirstResult("");
+            return;
+          }
+
+          const placeRecord = place as Record<string, unknown>;
+          const displayLines = Array.isArray(placeRecord.displayLines) ? placeRecord.displayLines : [];
+          const title = String(placeRecord.name ?? placeRecord.title ?? displayLines[0] ?? normalizedQuery);
+          const subtitle = String(placeRecord.formattedAddress ?? placeRecord.subtitle ?? displayLines[1] ?? "");
+
+          setSearchState("success");
+          setSearchMessage("Search callback completed. Raw callback payload is shown below.");
+          setFirstResult(subtitle ? `${title} — ${subtitle}` : title);
+        },
+        {
         includeAddresses: true,
         includePointsOfInterest: false,
         includePhysicalFeatures: false
-      });
-
-      console.log("MapKit direct search response", response);
-
-      const place = response.places?.[0];
-      if (!place) {
-        setSearchState("success");
-        setSearchMessage("Search completed, but no places were returned.");
-        return;
-      }
-
-      const title = String(place.name ?? place.title ?? place.displayLines?.[0] ?? normalizedQuery);
-      const subtitle = String(place.formattedAddress ?? place.subtitle ?? place.displayLines?.[1] ?? "");
-
-      setSearchState("success");
-      setSearchMessage("Search completed. Raw response was logged to the console.");
-      setFirstResult(subtitle ? `${title} — ${subtitle}` : title);
+        }
+      );
     } catch (error) {
-      console.error("MapKit direct search failed", error);
+      console.error("MapKit callback search failed before callback", error);
       setSearchState("error");
       setSearchMessage(stringifyError(error));
       setFirstResult("");
+      setSearchErrorLog(stringifyJson(error));
+      setSearchDataLog("undefined");
+      setSearchPlacesLog("undefined");
     }
   }
 
@@ -345,12 +394,12 @@ export default function MapKitTestPage() {
             background: "rgba(255, 255, 255, 0.86)"
           }}
         >
-          <h2 style={{ margin: 0, fontSize: 18 }}>Direct Search Test</h2>
-          <form onSubmit={(event) => void handleSearchSubmit(event)}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>Direct Search Callback Test</h2>
+          <form onSubmit={handleSearchSubmit}>
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Enter an address and press Enter"
+              placeholder="Enter a full address and press Enter"
               style={{
                 width: "100%",
                 borderRadius: 14,
@@ -368,6 +417,59 @@ export default function MapKitTestPage() {
           <p style={{ margin: 0, color: "#1f2522", fontWeight: 600, wordBreak: "break-word" }}>
             {firstResult || "First result will appear here."}
           </p>
+          <div style={{ display: "grid", gap: 10 }}>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Callback `error`</div>
+              <pre
+                style={{
+                  margin: 0,
+                  padding: 12,
+                  borderRadius: 14,
+                  background: "#f7f4ef",
+                  border: "1px solid rgba(31, 37, 34, 0.12)",
+                  overflowX: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word"
+                }}
+              >
+                {searchErrorLog}
+              </pre>
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Callback `data`</div>
+              <pre
+                style={{
+                  margin: 0,
+                  padding: 12,
+                  borderRadius: 14,
+                  background: "#f7f4ef",
+                  border: "1px solid rgba(31, 37, 34, 0.12)",
+                  overflowX: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word"
+                }}
+              >
+                {searchDataLog}
+              </pre>
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Callback `data.places`</div>
+              <pre
+                style={{
+                  margin: 0,
+                  padding: 12,
+                  borderRadius: 14,
+                  background: "#f7f4ef",
+                  border: "1px solid rgba(31, 37, 34, 0.12)",
+                  overflowX: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word"
+                }}
+              >
+                {searchPlacesLog}
+              </pre>
+            </div>
+          </div>
         </section>
 
         <section

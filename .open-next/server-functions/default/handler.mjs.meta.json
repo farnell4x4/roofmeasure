@@ -4155,7 +4155,7 @@
       "format": "cjs"
     },
     ".open-next/server-functions/default/.next/server/app/mapkit-test/page.js": {
-      "bytes": 24185,
+      "bytes": 25893,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -7184,7 +7184,7 @@
           "bytesInOutput": 11639
         },
         ".open-next/server-functions/default/.next/server/app/mapkit-test/page.js": {
-          "bytesInOutput": 24538
+          "bytesInOutput": 26260
         },
         ".open-next/server-functions/default/.next/server/app/_not-found/page.js": {
           "bytesInOutput": 18751
@@ -7361,7 +7361,7 @@
           "bytesInOutput": 59535
         }
       },
-      "bytes": 2894909
+      "bytes": 2896631
     }
   }
 }
