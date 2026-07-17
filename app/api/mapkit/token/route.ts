@@ -1,6 +1,6 @@
-import { SignJWT, importPKCS8 } from "jose";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getEnv } from "@/lib/env";
+import { SignJWT, importPKCS8 } from "@/lib/jose-worker";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +38,7 @@ function getSafeErrorDiagnostics(error: unknown) {
   };
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   let failedStep: TokenGenerationStep = "load-env";
 
   try {
@@ -57,15 +57,18 @@ export async function GET() {
     const algorithm = "ES256";
     const issuedAt = Math.floor(Date.now() / 1000);
     const expiresAt = issuedAt + 60 * 30;
+    const normalizedPrivateKey = env.mapKit.privateKey.replace(/\\n/g, "\n");
+    const origin = request.nextUrl.origin;
 
     failedStep = "import-private-key";
-    const privateKey = await importPKCS8(env.mapKit.privateKey, algorithm);
+    const privateKey = await importPKCS8(normalizedPrivateKey, algorithm);
 
     failedStep = "sign-jwt";
-    const token = await new SignJWT({})
+    const token = await new SignJWT(origin ? { origin } : {})
       .setProtectedHeader({ alg: algorithm, kid: env.mapKit.keyId, typ: "JWT" })
       .setIssuer(env.mapKit.teamId)
       .setIssuedAt(issuedAt)
+      .setAudience("https://appleid.apple.com")
       .setExpirationTime(expiresAt)
       .sign(privateKey);
 
