@@ -1,13 +1,13 @@
 :root {
   color-scheme: light;
-  --bg: #f4f1ea;
+  --bg: #ffffff;
   --surface: rgba(255, 255, 255, 0.88);
   --surface-strong: #fffdf8;
   --surface-muted: rgba(255, 255, 255, 0.7);
   --ink: #1f2522;
   --muted: #5f665f;
-  --accent: #c96f30;
-  --accent-strong: #8b4a1d;
+  --accent: #4169e1;
+  --accent-strong: #2747b5;
   --stroke: rgba(31, 37, 34, 0.12);
   --success: #2e7d5b;
   --danger: #b34b3f;
@@ -46,7 +46,7 @@ body {
   margin: 0;
   min-height: 100%;
   background:
-    radial-gradient(circle at top left, rgba(201, 111, 48, 0.18), transparent 28%),
+    radial-gradient(circle at top left, rgba(65, 105, 225, 0.12), transparent 28%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.55), transparent 36%),
     var(--bg);
   color: var(--ink);
