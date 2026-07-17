@@ -94,7 +94,7 @@ async function signMapKitJwt({
     iss: issuer,
     iat: issuedAt,
     exp: expiresAt,
-    aud: "https://appleid.apple.com",
+    scope: "mapkit_js",
     ...(origin ? { origin } : {})
   };
 
