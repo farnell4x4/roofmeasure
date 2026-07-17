@@ -1,6 +1,19 @@
 export type MapKitTokenResponse =
   | { ok: true; token: string; expiresAt: number; key: string }
-  | { ok: false; message: string };
+  | {
+      ok: false;
+      message: string;
+      diagnostics?: {
+        failedStep?: "load-env" | "import-private-key" | "sign-jwt";
+        message?: string;
+        privateKeyFormatChecks?: {
+          beginsWithBeginPrivateKey?: boolean;
+          endsWithEndPrivateKey?: boolean;
+          containsEscapedNewlines?: boolean;
+          containsLiteralNewlines?: boolean;
+        };
+      };
+    };
 
 export type MapKitEnvDiagnostics = Record<
   "NEXT_PUBLIC_MAPKIT_JS_KEY" | "MAPKIT_TEAM_ID" | "MAPKIT_KEY_ID" | "MAPKIT_PRIVATE_KEY",

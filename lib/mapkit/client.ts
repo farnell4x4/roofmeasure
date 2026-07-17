@@ -70,6 +70,39 @@ async function getMissingMapKitCredentials() {
     .map(([key]) => key);
 }
 
+function formatMapKitTokenFailure(tokenResponse: Extract<MapKitTokenResponse, { ok: false }>) {
+  const diagnostics = tokenResponse.diagnostics;
+  const failedStep = diagnostics?.failedStep;
+  const privateKeyChecks = diagnostics?.privateKeyFormatChecks;
+
+  if (failedStep === "import-private-key") {
+    const privateKeyProblems: string[] = [];
+    if (privateKeyChecks?.beginsWithBeginPrivateKey === false) {
+      privateKeyProblems.push("missing BEGIN PRIVATE KEY header");
+    }
+    if (privateKeyChecks?.endsWithEndPrivateKey === false) {
+      privateKeyProblems.push("missing END PRIVATE KEY footer");
+    }
+    if (privateKeyChecks?.containsEscapedNewlines === false && privateKeyChecks?.containsLiteralNewlines === false) {
+      privateKeyProblems.push("no newline separators detected");
+    }
+
+    if (privateKeyProblems.length > 0) {
+      return `MapKit token generation failed while importing MAPKIT_PRIVATE_KEY: ${privateKeyProblems.join(", ")}.`;
+    }
+  }
+
+  if (failedStep === "sign-jwt") {
+    return `MapKit token generation failed while signing the JWT: ${diagnostics?.message ?? tokenResponse.message}`;
+  }
+
+  if (diagnostics?.message) {
+    return `MapKit search is unavailable: ${diagnostics.message}`;
+  }
+
+  return `MapKit search is unavailable: ${tokenResponse.message}`;
+}
+
 export async function loadMapKit() {
   if (typeof window === "undefined") return;
   if (window.mapkit) return;
@@ -83,7 +116,14 @@ export async function loadMapKit() {
           const response = await fetch("/api/mapkit/token");
           const tokenResponse = (await response.json()) as MapKitTokenResponse;
           if (!tokenResponse.ok || !window.mapkit) {
-            reject(new Error("MapKit credentials missing"));
+            bootPromise = null;
+            reject(
+              new Error(
+                !tokenResponse.ok
+                  ? formatMapKitTokenFailure(tokenResponse)
+                  : "MapKit script loaded but window.mapkit was unavailable."
+              )
+            );
             return;
           }
           window.mapkit.init({
@@ -92,10 +132,14 @@ export async function loadMapKit() {
           });
           resolve();
         } catch (error) {
+          bootPromise = null;
           reject(error);
         }
       };
-      script.onerror = () => reject(new Error("MapKit script failed to load"));
+      script.onerror = () => {
+        bootPromise = null;
+        reject(new Error("MapKit script failed to load from Apple CDN."));
+      };
       document.head.appendChild(script);
     });
   }
@@ -108,7 +152,17 @@ export async function getMapKitConfigurationErrorMessage() {
     return `MapKit search is unavailable. Missing: ${missingKeys.join(", ")}.`;
   }
 
-  return "MapKit search is unavailable.";
+  try {
+    const response = await fetch("/api/mapkit/token");
+    const tokenResponse = (await response.json()) as MapKitTokenResponse;
+    if (!tokenResponse.ok) {
+      return formatMapKitTokenFailure(tokenResponse);
+    }
+  } catch {
+    return "MapKit search is unavailable: unable to reach /api/mapkit/token.";
+  }
+
+  return "MapKit search is unavailable for an unknown MapKit initialization reason.";
 }
 
 function createSearch() {
