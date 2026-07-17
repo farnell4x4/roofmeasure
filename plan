@@ -179,7 +179,7 @@ Flow:
 Use geographic coordinates as the canonical stored geometry and calculate real-world distances from those coordinates.
 
 Provide:
-
+   
 * Clear point markers
 * Clean line overlays
 * Active-line preview
