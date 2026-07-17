@@ -3,7 +3,7 @@
 import { MapPinned, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { searchAddressSuggestions } from "@/lib/mapkit/client";
+import { searchAddressSuggestions, searchBestAddressMatch } from "@/lib/mapkit/client";
 import { AddressSuggestion } from "@/types/mapkit";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -28,17 +28,52 @@ export function AddressSearch({
       return;
     }
 
+    const controller = new AbortController();
     setState("loading");
-    searchAddressSuggestions(debounced)
+    searchAddressSuggestions(debounced, controller.signal)
       .then((items) => {
         setResults(items);
         setState("idle");
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         setResults([]);
         setState("error");
       });
+
+    return () => controller.abort();
   }, [debounced, open]);
+
+  async function handleSubmit() {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) return;
+
+    setState("loading");
+    try {
+      const bestMatch = await searchBestAddressMatch(normalizedQuery);
+      if (!bestMatch) {
+        setResults([]);
+        setState("idle");
+        return;
+      }
+      onSelect(bestMatch);
+      setState("idle");
+    } catch {
+      setState("error");
+    }
+  }
+
+  async function handleSuggestionSelect(result: AddressSuggestion) {
+    setState("loading");
+    try {
+      const bestMatch = await searchBestAddressMatch(result);
+      onSelect(bestMatch ?? result);
+      setState("idle");
+    } catch {
+      onSelect(result);
+      setState("idle");
+    }
+  }
 
   if (!open) return null;
 
@@ -50,26 +85,33 @@ export function AddressSearch({
           Close
         </button>
       </div>
-      <Input
-        id="address-search"
-        label="Address Search"
-        placeholder="Start typing an address"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-      />
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleSubmit();
+        }}
+      >
+        <Input
+          id="address-search"
+          label="Address Search"
+          placeholder="Start typing an address"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </form>
       <div style={{ display: "grid", gap: 10 }}>
         {state === "loading" ? <p style={{ color: "var(--muted)", margin: 0 }}>Searching…</p> : null}
         {state === "error" ? (
           <p style={{ color: "var(--danger)", margin: 0 }}>MapKit search is unavailable until credentials are configured.</p>
         ) : null}
-        {state !== "loading" && query && results.length === 0 ? (
+        {state !== "loading" && state !== "error" && query && results.length === 0 ? (
           <p style={{ color: "var(--muted)", margin: 0 }}>No suggestions yet.</p>
         ) : null}
         {results.map((result) => (
           <button
             key={result.id}
             type="button"
-            onClick={() => onSelect(result)}
+            onClick={() => void handleSuggestionSelect(result)}
             style={{
               display: "grid",
               gap: 4,

@@ -6,6 +6,8 @@ export type AddressSuggestion = {
   id: string;
   title: string;
   subtitle?: string;
+  formattedAddress?: string;
   latitude?: number;
   longitude?: number;
+  mapkitResult?: unknown;
 };

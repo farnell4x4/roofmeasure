@@ -164,7 +164,7 @@ export function WorkspacePage({ projectId }: { projectId: string }) {
     const nextProject = {
       ...currentProject,
       location: {
-        formattedAddress: [suggestion.title, suggestion.subtitle].filter(Boolean).join(", "),
+        formattedAddress: suggestion.formattedAddress ?? [suggestion.title, suggestion.subtitle].filter(Boolean).join(", "),
         latitude: suggestion.latitude ?? DEFAULT_CAMERA.centerLat,
         longitude: suggestion.longitude ?? DEFAULT_CAMERA.centerLng
       },

@@ -2,14 +2,54 @@
 
 import { AddressSuggestion, MapKitTokenResponse } from "@/types/mapkit";
 
+type MapKitCoordinate = {
+  latitude?: number;
+  longitude?: number;
+};
+
+type MapKitAutocompleteResult = {
+  displayLines?: string[];
+  title?: string;
+  subtitle?: string;
+  name?: string;
+  formattedAddress?: string;
+  coordinate?: MapKitCoordinate;
+};
+
+type MapKitPlace = {
+  name?: string;
+  formattedAddress?: string;
+  title?: string;
+  subtitle?: string;
+  displayLines?: string[];
+  coordinate?: MapKitCoordinate;
+};
+
 declare global {
   interface Window {
     mapkit?: {
       init: (options: { authorizationCallback: (done: (token: string) => void) => void; language: string }) => void;
       Map: new (element: HTMLElement, options: Record<string, unknown>) => unknown;
       FeatureVisibility: { Hidden: string };
-      SearchAutocomplete?: new () => {
-        search: (query: string, callback: (error: unknown, data: Array<Record<string, unknown>>) => void) => void;
+      Search?: new (options?: { language?: string }) => {
+        autocomplete: (
+          query: string,
+          options?: {
+            includeAddresses?: boolean;
+            includePointsOfInterest?: boolean;
+            includePhysicalFeatures?: boolean;
+            signal?: AbortSignal;
+          }
+        ) => Promise<{ results?: MapKitAutocompleteResult[] }>;
+        search: (
+          query: string | MapKitAutocompleteResult,
+          options?: {
+            includeAddresses?: boolean;
+            includePointsOfInterest?: boolean;
+            includePhysicalFeatures?: boolean;
+            signal?: AbortSignal;
+          }
+        ) => Promise<{ places?: MapKitPlace[] }>;
       };
     };
   }
@@ -49,20 +89,66 @@ export async function loadMapKit() {
   return bootPromise;
 }
 
-export async function searchAddressSuggestions(query: string) {
+function createSearch() {
+  if (!window.mapkit?.Search) return null;
+  return new window.mapkit.Search({ language: "en" });
+}
+
+function toAddressSuggestion(
+  result: MapKitAutocompleteResult | MapKitPlace,
+  id: string
+): AddressSuggestion {
+  const title = String(result.name ?? result.displayLines?.[0] ?? result.title ?? result.formattedAddress ?? "");
+  const subtitle = String(result.formattedAddress ?? result.displayLines?.[1] ?? result.subtitle ?? "");
+
+  return {
+    id,
+    title,
+    subtitle,
+    formattedAddress: "formattedAddress" in result ? result.formattedAddress : undefined,
+    latitude: typeof result.coordinate?.latitude === "number" ? result.coordinate.latitude : undefined,
+    longitude: typeof result.coordinate?.longitude === "number" ? result.coordinate.longitude : undefined,
+    mapkitResult: "displayLines" in result ? result : undefined
+  };
+}
+
+export async function searchAddressSuggestions(query: string, signal?: AbortSignal) {
   if (!query.trim()) return [];
   await loadMapKit();
-  if (!window.mapkit?.SearchAutocomplete) return [];
+  const search = createSearch();
+  if (!search) return [];
 
-  return new Promise<AddressSuggestion[]>((resolve) => {
-    const autocomplete = new window.mapkit!.SearchAutocomplete!();
-    autocomplete.search(query, (_error, results) => {
-      const items = results.map((result, index) => ({
-        id: `${query}-${index}`,
-        title: String(result.title ?? query),
-        subtitle: String(result.subtitle ?? "")
-      }));
-      resolve(items);
-    });
+  const response = await search.autocomplete(query, {
+    includeAddresses: true,
+    includePointsOfInterest: false,
+    includePhysicalFeatures: false,
+    signal
   });
+
+  return (response.results ?? []).map((result, index) => toAddressSuggestion(result, `${query}-${index}`));
+}
+
+export async function searchBestAddressMatch(
+  query: string | AddressSuggestion,
+  signal?: AbortSignal
+): Promise<AddressSuggestion | null> {
+  const normalizedQuery = typeof query === "string" ? query.trim() : [query.title, query.subtitle].filter(Boolean).join(" ").trim();
+  if (!normalizedQuery) return null;
+
+  await loadMapKit();
+  const search = createSearch();
+  if (!search) return null;
+
+  const response = await search.search(
+    typeof query === "string" ? normalizedQuery : (query.mapkitResult as MapKitAutocompleteResult | undefined) ?? normalizedQuery,
+    {
+      includeAddresses: true,
+      includePointsOfInterest: false,
+      includePhysicalFeatures: false,
+      signal
+    }
+  );
+
+  const bestPlace = response.places?.[0];
+  return bestPlace ? toAddressSuggestion(bestPlace, `place-${normalizedQuery}`) : null;
 }
