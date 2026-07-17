@@ -63,6 +63,10 @@ export default function MapKitTestPage() {
   const [statuses, setStatuses] = useState(INITIAL_STATUSES);
   const [events, setEvents] = useState<string[]>([]);
   const [tokenPreview, setTokenPreview] = useState<string>("");
+  const [query, setQuery] = useState("");
+  const [searchState, setSearchState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [searchMessage, setSearchMessage] = useState("Type an address and press Enter.");
+  const [firstResult, setFirstResult] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
@@ -207,6 +211,55 @@ export default function MapKitTestPage() {
     };
   }, []);
 
+  async function handleSearchSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) return;
+
+    const mapkitWindow = window as Window & { mapkit?: NonNullable<Window["mapkit"]> };
+    if (!mapkitWindow.mapkit?.Search) {
+      setSearchState("error");
+      setSearchMessage("MapKit Search is unavailable on window.mapkit.");
+      setFirstResult("");
+      return;
+    }
+
+    try {
+      setSearchState("loading");
+      setSearchMessage(`Searching for "${normalizedQuery}"...`);
+      setFirstResult("");
+
+      const search = new mapkitWindow.mapkit.Search({ language: "en" });
+      const response = await search.search(normalizedQuery, {
+        includeAddresses: true,
+        includePointsOfInterest: false,
+        includePhysicalFeatures: false
+      });
+
+      console.log("MapKit direct search response", response);
+
+      const place = response.places?.[0];
+      if (!place) {
+        setSearchState("success");
+        setSearchMessage("Search completed, but no places were returned.");
+        return;
+      }
+
+      const title = String(place.name ?? place.title ?? place.displayLines?.[0] ?? normalizedQuery);
+      const subtitle = String(place.formattedAddress ?? place.subtitle ?? place.displayLines?.[1] ?? "");
+
+      setSearchState("success");
+      setSearchMessage("Search completed. Raw response was logged to the console.");
+      setFirstResult(subtitle ? `${title} — ${subtitle}` : title);
+    } catch (error) {
+      console.error("MapKit direct search failed", error);
+      setSearchState("error");
+      setSearchMessage(stringifyError(error));
+      setFirstResult("");
+    }
+  }
+
   return (
     <main
       style={{
@@ -281,6 +334,41 @@ export default function MapKitTestPage() {
             background: "#d9ddd8"
           }}
         />
+
+        <section
+          style={{
+            display: "grid",
+            gap: 12,
+            padding: 16,
+            borderRadius: 18,
+            border: "1px solid rgba(31, 37, 34, 0.12)",
+            background: "rgba(255, 255, 255, 0.86)"
+          }}
+        >
+          <h2 style={{ margin: 0, fontSize: 18 }}>Direct Search Test</h2>
+          <form onSubmit={(event) => void handleSearchSubmit(event)}>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Enter an address and press Enter"
+              style={{
+                width: "100%",
+                borderRadius: 14,
+                border: "1px solid rgba(31, 37, 34, 0.16)",
+                padding: "12px 14px",
+                fontSize: 16,
+                background: "#fff",
+                color: "#1f2522"
+              }}
+            />
+          </form>
+          <p style={{ margin: 0, color: searchState === "error" ? "#b43f2d" : "#5f685f", wordBreak: "break-word" }}>
+            {searchMessage}
+          </p>
+          <p style={{ margin: 0, color: "#1f2522", fontWeight: 600, wordBreak: "break-word" }}>
+            {firstResult || "First result will appear here."}
+          </p>
+        </section>
 
         <section
           style={{
