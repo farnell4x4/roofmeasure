@@ -3754,7 +3754,7 @@
       "format": "cjs"
     },
     ".open-next/server-functions/default/.next/server/app/projects/[projectId]/report/page.js": {
-      "bytes": 29377,
+      "bytes": 29001,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -4038,7 +4038,7 @@
       "format": "cjs"
     },
     ".open-next/server-functions/default/.next/server/app/projects/[projectId]/page.js": {
-      "bytes": 42389,
+      "bytes": 42726,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -4287,7 +4287,7 @@
       "format": "cjs"
     },
     ".open-next/server-functions/default/.next/server/app/projects/page.js": {
-      "bytes": 24487,
+      "bytes": 24111,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -7085,7 +7085,7 @@
           "bytesInOutput": 1891
         },
         ".open-next/server-functions/default/.next/server/app/projects/[projectId]/report/page.js": {
-          "bytesInOutput": 30038
+          "bytesInOutput": 29620
         },
         ".open-next/server-functions/default/node_modules/next/dist/compiled/next-server/app-route.runtime.prod.js": {
           "bytesInOutput": 170953
@@ -7097,7 +7097,7 @@
           "bytesInOutput": 7083
         },
         ".open-next/server-functions/default/.next/server/app/projects/[projectId]/page.js": {
-          "bytesInOutput": 43477
+          "bytesInOutput": 43804
         },
         ".open-next/server-functions/default/.next/server/app/api/mapkit/token/route.js": {
           "bytesInOutput": 11653
@@ -7109,7 +7109,7 @@
           "bytesInOutput": 29551
         },
         ".open-next/server-functions/default/.next/server/app/projects/page.js": {
-          "bytesInOutput": 24976
+          "bytesInOutput": 24558
         },
         ".open-next/server-functions/default/.next/server/app/offline/page.js": {
           "bytesInOutput": 19472
@@ -7277,7 +7277,7 @@
           "bytesInOutput": 59019
         }
       },
-      "bytes": 2863199
+      "bytes": 2862690
     }
   }
 }
