@@ -3246,6 +3246,11 @@
       "imports": [],
       "format": "cjs"
     },
+    ".open-next/server-functions/default/.next/server/app/api/mapkit/diagnostics/route_client-reference-manifest.js": {
+      "bytes": 7070,
+      "imports": [],
+      "format": "cjs"
+    },
     ".open-next/server-functions/default/.next/server/app/manifest.webmanifest/route_client-reference-manifest.js": {
       "bytes": 7066,
       "imports": [],
@@ -3257,7 +3262,7 @@
       "format": "cjs"
     },
     ".open-next/server-functions/default/node_modules/next/dist/server/load-manifest.external.js": {
-      "bytes": 56214,
+      "bytes": 57088,
       "imports": [
         {
           "path": "path",
@@ -3278,6 +3283,11 @@
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/deep-freeze.js",
           "kind": "require-call",
           "original": "../shared/lib/deep-freeze"
+        },
+        {
+          "path": ".open-next/server-functions/default/.next/server/app/api/mapkit/diagnostics/route_client-reference-manifest.js",
+          "kind": "require-call",
+          "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/api/mapkit/diagnostics/route_client-reference-manifest.js"
         },
         {
           "path": ".open-next/server-functions/default/.next/server/app/manifest.webmanifest/route_client-reference-manifest.js",
@@ -3925,6 +3935,57 @@
       ],
       "format": "cjs"
     },
+    ".open-next/server-functions/default/.next/server/app/api/mapkit/diagnostics/route.js": {
+      "bytes": 7598,
+      "imports": [
+        {
+          "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
+          "kind": "require-call",
+          "original": "next/dist/shared/lib/router/utils/app-paths"
+        },
+        {
+          "path": ".open-next/server-functions/default/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js",
+          "kind": "require-call",
+          "original": "next/dist/compiled/next-server/app-page.runtime.prod.js"
+        },
+        {
+          "path": ".open-next/server-functions/default/node_modules/next/dist/server/app-render/work-unit-async-storage.external.js",
+          "kind": "require-call",
+          "original": "next/dist/server/app-render/work-unit-async-storage.external.js"
+        },
+        {
+          "path": ".open-next/server-functions/default/node_modules/next/dist/server/app-render/after-task-async-storage.external.js",
+          "kind": "require-call",
+          "original": "next/dist/server/app-render/after-task-async-storage.external.js"
+        },
+        {
+          "path": ".open-next/server-functions/default/node_modules/next/dist/compiled/next-server/app-route.runtime.prod.js",
+          "kind": "require-call",
+          "original": "next/dist/compiled/next-server/app-route.runtime.prod.js"
+        },
+        {
+          "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/no-fallback-error.external.js",
+          "kind": "require-call",
+          "original": "next/dist/shared/lib/no-fallback-error.external"
+        },
+        {
+          "path": ".open-next/server-functions/default/node_modules/next/dist/server/app-render/action-async-storage.external.js",
+          "kind": "require-call",
+          "original": "next/dist/server/app-render/action-async-storage.external.js"
+        },
+        {
+          "path": ".open-next/server-functions/default/node_modules/next/dist/server/app-render/work-async-storage.external.js",
+          "kind": "require-call",
+          "original": "next/dist/server/app-render/work-async-storage.external.js"
+        },
+        {
+          "path": ".open-next/server-functions/default/.next/server/webpack-runtime.js",
+          "kind": "require-call",
+          "original": "../../../../webpack-runtime.js"
+        }
+      ],
+      "format": "cjs"
+    },
     ".open-next/server-functions/default/.next/server/app/manifest.webmanifest/route.js": {
       "bytes": 6998,
       "imports": [
@@ -4043,7 +4104,7 @@
       "format": "cjs"
     },
     ".open-next/server-functions/default/.next/server/app/api/mapkit/token/route.js": {
-      "bytes": 80369,
+      "bytes": 23181,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -4054,21 +4115,6 @@
           "path": ".open-next/server-functions/default/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js",
           "kind": "require-call",
           "original": "next/dist/compiled/next-server/app-page.runtime.prod.js"
-        },
-        {
-          "path": "node:crypto",
-          "kind": "require-call",
-          "external": true
-        },
-        {
-          "path": "node:buffer",
-          "kind": "require-call",
-          "external": true
-        },
-        {
-          "path": "node:util",
-          "kind": "require-call",
-          "external": true
         },
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/server/app-render/work-unit-async-storage.external.js",
@@ -4089,6 +4135,21 @@
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/no-fallback-error.external.js",
           "kind": "require-call",
           "original": "next/dist/shared/lib/no-fallback-error.external"
+        },
+        {
+          "path": "node:crypto",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:buffer",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:util",
+          "kind": "require-call",
+          "external": true
         },
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/server/app-render/action-async-storage.external.js",
@@ -4174,8 +4235,8 @@
       ],
       "format": "cjs"
     },
-    ".open-next/server-functions/default/.next/server/app/projects/page.js": {
-      "bytes": 24487,
+    ".open-next/server-functions/default/.next/server/app/settings/page.js": {
+      "bytes": 28861,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -4240,8 +4301,8 @@
       ],
       "format": "cjs"
     },
-    ".open-next/server-functions/default/.next/server/app/settings/page.js": {
-      "bytes": 28861,
+    ".open-next/server-functions/default/.next/server/app/projects/page.js": {
+      "bytes": 24487,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -4784,7 +4845,7 @@
       "format": "cjs"
     },
     ".open-next/server-functions/default/node_modules/next/dist/server/require.js": {
-      "bytes": 16138,
+      "bytes": 16396,
       "imports": [
         {
           "path": "path",
@@ -4837,6 +4898,11 @@
           "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/projects/[projectId]/report/page.js"
         },
         {
+          "path": ".open-next/server-functions/default/.next/server/app/api/mapkit/diagnostics/route.js",
+          "kind": "require-call",
+          "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/api/mapkit/diagnostics/route.js"
+        },
+        {
           "path": ".open-next/server-functions/default/.next/server/app/manifest.webmanifest/route.js",
           "kind": "require-call",
           "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/manifest.webmanifest/route.js"
@@ -4857,14 +4923,14 @@
           "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/_not-found/page.js"
         },
         {
-          "path": ".open-next/server-functions/default/.next/server/app/projects/page.js",
-          "kind": "require-call",
-          "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/projects/page.js"
-        },
-        {
           "path": ".open-next/server-functions/default/.next/server/app/settings/page.js",
           "kind": "require-call",
           "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/settings/page.js"
+        },
+        {
+          "path": ".open-next/server-functions/default/.next/server/app/projects/page.js",
+          "kind": "require-call",
+          "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/projects/page.js"
         },
         {
           "path": ".open-next/server-functions/default/.next/server/app/offline/page.js",
@@ -5801,7 +5867,7 @@
       "format": "esm"
     },
     ".open-next/server-functions/default/index.mjs": {
-      "bytes": 85268,
+      "bytes": 85328,
       "imports": [
         {
           "path": "node:module",
@@ -6955,14 +7021,17 @@
         ".open-next/server-functions/default/node_modules/next/dist/shared/lib/deep-freeze.js": {
           "bytesInOutput": 586
         },
+        ".open-next/server-functions/default/.next/server/app/api/mapkit/diagnostics/route_client-reference-manifest.js": {
+          "bytesInOutput": 6526
+        },
         ".open-next/server-functions/default/.next/server/app/manifest.webmanifest/route_client-reference-manifest.js": {
-          "bytesInOutput": 6520
+          "bytesInOutput": 6521
         },
         ".open-next/server-functions/default/.next/server/app/api/mapkit/token/route_client-reference-manifest.js": {
           "bytesInOutput": 6509
         },
         ".open-next/server-functions/default/node_modules/next/dist/server/load-manifest.external.js": {
-          "bytesInOutput": 45833
+          "bytesInOutput": 46488
         },
         ".open-next/server-functions/default/node_modules/next/dist/server/app-render/action-async-storage-instance.js": {
           "bytesInOutput": 501
@@ -7051,23 +7120,26 @@
         ".open-next/server-functions/default/node_modules/next/dist/compiled/next-server/app-route.runtime.prod.js": {
           "bytesInOutput": 170953
         },
+        ".open-next/server-functions/default/.next/server/app/api/mapkit/diagnostics/route.js": {
+          "bytesInOutput": 7713
+        },
         ".open-next/server-functions/default/.next/server/app/manifest.webmanifest/route.js": {
-          "bytesInOutput": 7082
+          "bytesInOutput": 7083
         },
         ".open-next/server-functions/default/.next/server/app/projects/[projectId]/page.js": {
           "bytesInOutput": 40850
         },
         ".open-next/server-functions/default/.next/server/app/api/mapkit/token/route.js": {
-          "bytesInOutput": 89233
+          "bytesInOutput": 23922
         },
         ".open-next/server-functions/default/.next/server/app/_not-found/page.js": {
           "bytesInOutput": 18751
         },
-        ".open-next/server-functions/default/.next/server/app/projects/page.js": {
-          "bytesInOutput": 24976
-        },
         ".open-next/server-functions/default/.next/server/app/settings/page.js": {
           "bytesInOutput": 29551
+        },
+        ".open-next/server-functions/default/.next/server/app/projects/page.js": {
+          "bytesInOutput": 24976
         },
         ".open-next/server-functions/default/.next/server/app/offline/page.js": {
           "bytesInOutput": 19472
@@ -7124,7 +7196,7 @@
           "bytesInOutput": 19139
         },
         ".open-next/server-functions/default/node_modules/next/dist/server/require.js": {
-          "bytesInOutput": 12520
+          "bytesInOutput": 12624
         },
         ".open-next/server-functions/default/node_modules/next/dist/lib/wait.js": {
           "bytesInOutput": 341
@@ -7232,10 +7304,10 @@
           "bytesInOutput": 5072
         },
         ".open-next/server-functions/default/index.mjs": {
-          "bytesInOutput": 58961
+          "bytesInOutput": 59019
         }
       },
-      "bytes": 2921305
+      "bytes": 2871052
     }
   }
 }

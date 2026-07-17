@@ -2,8 +2,10 @@ import { SignJWT, importPKCS8 } from "jose";
 import { NextResponse } from "next/server";
 import { getEnv } from "@/lib/env";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
-  const env = getEnv();
+  const env = await getEnv();
 
   if (!env.mapKit.isConfigured) {
     return NextResponse.json(
