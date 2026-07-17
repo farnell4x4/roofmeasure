@@ -3,7 +3,11 @@
 import { MapPinned, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { searchAddressSuggestions, searchBestAddressMatch } from "@/lib/mapkit/client";
+import {
+  getMapKitConfigurationErrorMessage,
+  searchAddressSuggestions,
+  searchBestAddressMatch
+} from "@/lib/mapkit/client";
 import { AddressSuggestion } from "@/types/mapkit";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -20,6 +24,7 @@ export function AddressSearch({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<AddressSuggestion[]>([]);
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState("MapKit search is unavailable.");
   const debounced = useDebouncedValue(query, 300);
 
   useEffect(() => {
@@ -34,10 +39,12 @@ export function AddressSearch({
       .then((items) => {
         setResults(items);
         setState("idle");
+        setErrorMessage("MapKit search is unavailable.");
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setResults([]);
+        setErrorMessage(await getMapKitConfigurationErrorMessage());
         setState("error");
       });
 
@@ -57,8 +64,10 @@ export function AddressSearch({
         return;
       }
       onSelect(bestMatch);
+      setErrorMessage("MapKit search is unavailable.");
       setState("idle");
     } catch {
+      setErrorMessage(await getMapKitConfigurationErrorMessage());
       setState("error");
     }
   }
@@ -68,8 +77,10 @@ export function AddressSearch({
     try {
       const bestMatch = await searchBestAddressMatch(result);
       onSelect(bestMatch ?? result);
+      setErrorMessage("MapKit search is unavailable.");
       setState("idle");
     } catch {
+      setErrorMessage(await getMapKitConfigurationErrorMessage());
       onSelect(result);
       setState("idle");
     }
@@ -102,7 +113,7 @@ export function AddressSearch({
       <div style={{ display: "grid", gap: 10 }}>
         {state === "loading" ? <p style={{ color: "var(--muted)", margin: 0 }}>Searching…</p> : null}
         {state === "error" ? (
-          <p style={{ color: "var(--danger)", margin: 0 }}>MapKit search is unavailable until credentials are configured.</p>
+          <p style={{ color: "var(--danger)", margin: 0 }}>{errorMessage}</p>
         ) : null}
         {state !== "loading" && state !== "error" && query && results.length === 0 ? (
           <p style={{ color: "var(--muted)", margin: 0 }}>No suggestions yet.</p>

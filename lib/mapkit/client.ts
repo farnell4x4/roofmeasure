@@ -1,6 +1,6 @@
 "use client";
 
-import { AddressSuggestion, MapKitTokenResponse } from "@/types/mapkit";
+import { AddressSuggestion, MapKitEnvDiagnostics, MapKitTokenResponse } from "@/types/mapkit";
 
 type MapKitCoordinate = {
   latitude?: number;
@@ -57,6 +57,19 @@ declare global {
 
 let bootPromise: Promise<void> | null = null;
 
+async function getMissingMapKitCredentials() {
+  const response = await fetch("/api/mapkit/diagnostics");
+  if (!response.ok) return [];
+
+  const payload = (await response.json()) as { ok?: boolean; diagnostics?: MapKitEnvDiagnostics };
+  const diagnostics = payload.diagnostics;
+  if (!diagnostics) return [];
+
+  return Object.entries(diagnostics)
+    .filter(([, value]) => !value.exists)
+    .map(([key]) => key);
+}
+
 export async function loadMapKit() {
   if (typeof window === "undefined") return;
   if (window.mapkit) return;
@@ -87,6 +100,15 @@ export async function loadMapKit() {
     });
   }
   return bootPromise;
+}
+
+export async function getMapKitConfigurationErrorMessage() {
+  const missingKeys = await getMissingMapKitCredentials();
+  if (missingKeys.length > 0) {
+    return `MapKit search is unavailable. Missing: ${missingKeys.join(", ")}.`;
+  }
+
+  return "MapKit search is unavailable.";
 }
 
 function createSearch() {
