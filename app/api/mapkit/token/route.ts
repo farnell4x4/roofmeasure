@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getEnv } from "@/lib/env";
-import { SignJWT, importPKCS8 } from "@/lib/jose-worker";
+import { SignJWT, importPKCS8 } from "jose";
 
 export const dynamic = "force-dynamic";
 
