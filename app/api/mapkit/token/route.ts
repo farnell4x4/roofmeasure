@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getEnv } from "@/lib/env";
-import { SignJWT, importPKCS8 } from "jose";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +37,84 @@ function getSafeErrorDiagnostics(error: unknown) {
   };
 }
 
+function toBase64Url(input: ArrayBuffer | Uint8Array | string) {
+  const bytes =
+    typeof input === "string"
+      ? new TextEncoder().encode(input)
+      : input instanceof Uint8Array
+        ? input
+        : new Uint8Array(input);
+
+  const base64 = Buffer.from(bytes).toString("base64");
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function importMapKitPrivateKey(privateKeyPem: string) {
+  const normalized = privateKeyPem
+    .replace("-----BEGIN PRIVATE KEY-----", "")
+    .replace("-----END PRIVATE KEY-----", "")
+    .replace(/\s+/g, "");
+
+  const keyData = Buffer.from(normalized, "base64");
+
+  return crypto.subtle.importKey(
+    "pkcs8",
+    keyData,
+    {
+      name: "ECDSA",
+      namedCurve: "P-256"
+    },
+    false,
+    ["sign"]
+  );
+}
+
+async function signMapKitJwt({
+  issuer,
+  keyId,
+  origin,
+  privateKey,
+  issuedAt,
+  expiresAt
+}: {
+  issuer: string;
+  keyId: string;
+  origin: string;
+  privateKey: string;
+  issuedAt: number;
+  expiresAt: number;
+}) {
+  const header = {
+    alg: "ES256",
+    kid: keyId,
+    typ: "JWT"
+  };
+
+  const payload = {
+    iss: issuer,
+    iat: issuedAt,
+    exp: expiresAt,
+    aud: "https://appleid.apple.com",
+    ...(origin ? { origin } : {})
+  };
+
+  const encodedHeader = toBase64Url(JSON.stringify(header));
+  const encodedPayload = toBase64Url(JSON.stringify(payload));
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+
+  const cryptoKey = await importMapKitPrivateKey(privateKey);
+  const signature = await crypto.subtle.sign(
+    {
+      name: "ECDSA",
+      hash: "SHA-256"
+    },
+    cryptoKey,
+    new TextEncoder().encode(signingInput)
+  );
+
+  return `${signingInput}.${toBase64Url(signature)}`;
+}
+
 export async function GET(request: NextRequest) {
   let failedStep: TokenGenerationStep = "load-env";
 
@@ -54,23 +131,23 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const algorithm = "ES256";
     const issuedAt = Math.floor(Date.now() / 1000);
     const expiresAt = issuedAt + 60 * 30;
     const normalizedPrivateKey = env.mapKit.privateKey.replace(/\\n/g, "\n");
     const origin = request.nextUrl.origin;
 
     failedStep = "import-private-key";
-    const privateKey = await importPKCS8(normalizedPrivateKey, algorithm);
+    await importMapKitPrivateKey(normalizedPrivateKey);
 
     failedStep = "sign-jwt";
-    const token = await new SignJWT(origin ? { origin } : {})
-      .setProtectedHeader({ alg: algorithm, kid: env.mapKit.keyId, typ: "JWT" })
-      .setIssuer(env.mapKit.teamId)
-      .setIssuedAt(issuedAt)
-      .setAudience("https://appleid.apple.com")
-      .setExpirationTime(expiresAt)
-      .sign(privateKey);
+    const token = await signMapKitJwt({
+      issuer: env.mapKit.teamId,
+      keyId: env.mapKit.keyId,
+      origin,
+      privateKey: normalizedPrivateKey,
+      issuedAt,
+      expiresAt
+    });
 
     return NextResponse.json({
       ok: true,
