@@ -4104,7 +4104,7 @@
       "format": "cjs"
     },
     ".open-next/server-functions/default/.next/server/app/api/mapkit/token/route.js": {
-      "bytes": 11414,
+      "bytes": 11400,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -4220,8 +4220,8 @@
       ],
       "format": "cjs"
     },
-    ".open-next/server-functions/default/.next/server/app/settings/page.js": {
-      "bytes": 28861,
+    ".open-next/server-functions/default/.next/server/app/projects/page.js": {
+      "bytes": 24111,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -4286,8 +4286,8 @@
       ],
       "format": "cjs"
     },
-    ".open-next/server-functions/default/.next/server/app/projects/page.js": {
-      "bytes": 24111,
+    ".open-next/server-functions/default/.next/server/app/settings/page.js": {
+      "bytes": 28861,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -4908,14 +4908,14 @@
           "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/_not-found/page.js"
         },
         {
-          "path": ".open-next/server-functions/default/.next/server/app/settings/page.js",
-          "kind": "require-call",
-          "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/settings/page.js"
-        },
-        {
           "path": ".open-next/server-functions/default/.next/server/app/projects/page.js",
           "kind": "require-call",
           "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/projects/page.js"
+        },
+        {
+          "path": ".open-next/server-functions/default/.next/server/app/settings/page.js",
+          "kind": "require-call",
+          "original": "/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.open-next/server-functions/default/.next/server/app/settings/page.js"
         },
         {
           "path": ".open-next/server-functions/default/.next/server/app/offline/page.js",
@@ -7100,16 +7100,16 @@
           "bytesInOutput": 43804
         },
         ".open-next/server-functions/default/.next/server/app/api/mapkit/token/route.js": {
-          "bytesInOutput": 11653
+          "bytesInOutput": 11639
         },
         ".open-next/server-functions/default/.next/server/app/_not-found/page.js": {
           "bytesInOutput": 18751
         },
-        ".open-next/server-functions/default/.next/server/app/settings/page.js": {
-          "bytesInOutput": 29551
-        },
         ".open-next/server-functions/default/.next/server/app/projects/page.js": {
           "bytesInOutput": 24558
+        },
+        ".open-next/server-functions/default/.next/server/app/settings/page.js": {
+          "bytesInOutput": 29551
         },
         ".open-next/server-functions/default/.next/server/app/offline/page.js": {
           "bytesInOutput": 19472
@@ -7277,7 +7277,7 @@
           "bytesInOutput": 59019
         }
       },
-      "bytes": 2862690
+      "bytes": 2862676
     }
   }
 }
