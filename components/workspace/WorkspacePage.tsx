@@ -2,7 +2,7 @@
 
 import { ArrowLeft, FileText, MapPinned, Redo2, Save, Settings, Trash2, Undo2 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AddressSearch } from "@/components/workspace/AddressSearch";
 import { MapViewport } from "@/components/workspace/MapViewport";
@@ -15,12 +15,13 @@ import { useProject } from "@/hooks/useProject";
 import { useToast } from "@/components/ui/ToastProvider";
 import { calculateProjectTotals } from "@/lib/calculations";
 import { DEFAULT_CAMERA } from "@/lib/constants";
-import { haversineDistanceFeet, pointFromClientOffset } from "@/lib/geometry";
+import { haversineDistanceFeet } from "@/lib/geometry";
 import { detectRoofPlanes } from "@/lib/plane-detection";
 import { generateId, nowIso } from "@/lib/utils";
 import { AddressSuggestion } from "@/types/mapkit";
 import {
   GeographicPoint,
+  MapCameraState,
   MeasurementSegment,
   MeasurementType,
   Project
@@ -30,7 +31,6 @@ type Snapshot = Project;
 
 export function WorkspacePage({ projectId }: { projectId: string }) {
   const params = useSearchParams();
-  const mapRef = useRef<HTMLDivElement | null>(null);
   const { push } = useToast();
   const { project, setProject, isLoading, save, saveState } = useProject(projectId);
   const [selectedType, setSelectedType] = useState<MeasurementType | null>("eave");
@@ -107,17 +107,12 @@ export function WorkspacePage({ projectId }: { projectId: string }) {
     };
   }
 
-  function handleCanvasTap(event: React.PointerEvent<HTMLDivElement>) {
+  function handleMapTap(coordinate: { lat: number; lng: number }) {
     if (!selectedType) {
       push({ title: "Choose a measurement type first.", tone: "danger" });
       return;
     }
 
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - bounds.left;
-    const y = event.clientY - bounds.top;
-    const camera = currentProject.mapCamera ?? DEFAULT_CAMERA;
-    const coordinate = pointFromClientOffset(x, y, bounds.width, bounds.height, camera);
     const nextPoint = buildPoint(coordinate.lat, coordinate.lng);
 
     if (!activeStartPointId) {
@@ -158,6 +153,26 @@ export function WorkspacePage({ projectId }: { projectId: string }) {
     });
     snapshot(nextProject);
     setActiveStartPointId(currentProject.preferences.continuationMode === "continuous" ? nextPoint.id : null);
+  }
+
+  function handleCameraChange(nextCamera: MapCameraState) {
+    const previousCamera = currentProject.mapCamera ?? DEFAULT_CAMERA;
+    const changed =
+      Math.abs(previousCamera.centerLat - nextCamera.centerLat) > 0.000001 ||
+      Math.abs(previousCamera.centerLng - nextCamera.centerLng) > 0.000001 ||
+      Math.abs(previousCamera.latSpan - nextCamera.latSpan) > 0.000001 ||
+      Math.abs(previousCamera.lngSpan - nextCamera.lngSpan) > 0.000001;
+
+    if (!changed) return;
+
+    const nextProject = {
+      ...currentProject,
+      mapCamera: nextCamera,
+      updatedAt: nowIso()
+    };
+
+    setProject(nextProject);
+    void save(nextProject);
   }
 
   function handleAddressSelect(suggestion: AddressSuggestion) {
@@ -235,12 +250,12 @@ export function WorkspacePage({ projectId }: { projectId: string }) {
         />
 
         <MapViewport
-          mapRef={mapRef}
           project={currentProject}
           camera={currentProject.mapCamera ?? DEFAULT_CAMERA}
           selectedType={selectedType}
           activeStartPointId={activeStartPointId}
-          onCanvasTap={handleCanvasTap}
+          onMapTap={handleMapTap}
+          onCameraChange={handleCameraChange}
           unitSystem={currentProject.preferences.unitSystem}
           decimalFeet={currentProject.preferences.displayDecimalFeet}
           promptVisible={!currentProject.preferences.measurementPromptDismissed}

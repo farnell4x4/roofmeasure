@@ -7,6 +7,16 @@ type MapKitCoordinate = {
   longitude?: number;
 };
 
+type MapKitCoordinateSpan = {
+  latitudeDelta: number;
+  longitudeDelta: number;
+};
+
+type MapKitCoordinateRegion = {
+  center: MapKitCoordinate;
+  span: MapKitCoordinateSpan;
+};
+
 type MapKitAutocompleteResult = {
   displayLines?: string[];
   title?: string;
@@ -29,7 +39,34 @@ declare global {
   interface Window {
     mapkit?: {
       init: (options: { authorizationCallback: (done: (token: string) => void) => void; language: string }) => void;
-      Map: new (element: HTMLElement, options: Record<string, unknown>) => unknown;
+      Coordinate: new (latitude: number, longitude: number) => MapKitCoordinate;
+      CoordinateSpan: new (latitudeDelta: number, longitudeDelta: number) => MapKitCoordinateSpan;
+      CoordinateRegion: new (center: MapKitCoordinate, span: MapKitCoordinateSpan) => MapKitCoordinateRegion;
+      MapType: {
+        Satellite: "satellite";
+        Hybrid: "hybrid";
+        MutedStandard: "mutedStandard";
+        Standard: "standard";
+      };
+      Map: new (
+        element: HTMLElement,
+        options: {
+          showsCompass?: "visible" | "hidden" | "adaptive";
+          showsMapTypeControl?: boolean;
+          isRotationEnabled?: boolean;
+          isPitchEnabled?: boolean;
+          mapType?: "satellite" | "hybrid" | "mutedStandard" | "standard";
+          region?: MapKitCoordinateRegion;
+        }
+      ) => {
+        region: MapKitCoordinateRegion;
+        mapType: "satellite" | "hybrid" | "mutedStandard" | "standard";
+        addEventListener: (type: string, listener: (event: Record<string, unknown>) => void) => void;
+        removeEventListener: (type: string, listener: (event: Record<string, unknown>) => void) => void;
+        convertPointOnPageToCoordinate: (point: DOMPoint) => MapKitCoordinate;
+        convertCoordinateToPointOnPage: (coordinate: MapKitCoordinate) => DOMPoint;
+        destroy: () => void;
+      };
       FeatureVisibility: { Hidden: string };
       Search?: new (options?: { language?: string }) => {
         autocomplete: (
@@ -56,6 +93,10 @@ declare global {
 }
 
 let bootPromise: Promise<void> | null = null;
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 async function getMissingMapKitCredentials() {
   const response = await fetch("/api/mapkit/diagnostics");
@@ -109,7 +150,7 @@ export async function loadMapKit() {
   if (!bootPromise) {
     bootPromise = new Promise<void>((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = "https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.core.js";
+      script.src = "https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js";
       script.async = true;
       script.onload = async () => {
         try {
@@ -163,6 +204,18 @@ export async function getMapKitConfigurationErrorMessage() {
   }
 
   return "MapKit search is unavailable for an unknown MapKit initialization reason.";
+}
+
+export function getMapKitRuntimeErrorMessage(error: unknown) {
+  return getErrorMessage(error, "MapKit search is unavailable.");
+}
+
+export function createMapKitRegion(centerLat: number, centerLng: number, latSpan: number, lngSpan: number) {
+  if (!window.mapkit) return null;
+
+  const center = new window.mapkit.Coordinate(centerLat, centerLng);
+  const span = new window.mapkit.CoordinateSpan(latSpan, lngSpan);
+  return new window.mapkit.CoordinateRegion(center, span);
 }
 
 function createSearch() {

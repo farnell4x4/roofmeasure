@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   getMapKitConfigurationErrorMessage,
+  getMapKitRuntimeErrorMessage,
   searchAddressSuggestions,
   searchBestAddressMatch
 } from "@/lib/mapkit/client";
@@ -44,7 +45,7 @@ export function AddressSearch({
       .catch(async (error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setResults([]);
-        setErrorMessage(await getMapKitConfigurationErrorMessage());
+        setErrorMessage(getMapKitRuntimeErrorMessage(error) || (await getMapKitConfigurationErrorMessage()));
         setState("error");
       });
 
@@ -66,8 +67,8 @@ export function AddressSearch({
       onSelect(bestMatch);
       setErrorMessage("MapKit search is unavailable.");
       setState("idle");
-    } catch {
-      setErrorMessage(await getMapKitConfigurationErrorMessage());
+    } catch (error) {
+      setErrorMessage(getMapKitRuntimeErrorMessage(error) || (await getMapKitConfigurationErrorMessage()));
       setState("error");
     }
   }
@@ -79,8 +80,8 @@ export function AddressSearch({
       onSelect(bestMatch ?? result);
       setErrorMessage("MapKit search is unavailable.");
       setState("idle");
-    } catch {
-      setErrorMessage(await getMapKitConfigurationErrorMessage());
+    } catch (error) {
+      setErrorMessage(getMapKitRuntimeErrorMessage(error) || (await getMapKitConfigurationErrorMessage()));
       onSelect(result);
       setState("idle");
     }
@@ -116,7 +117,7 @@ export function AddressSearch({
           <p style={{ color: "var(--danger)", margin: 0 }}>{errorMessage}</p>
         ) : null}
         {state !== "loading" && state !== "error" && query && results.length === 0 ? (
-          <p style={{ color: "var(--muted)", margin: 0 }}>No suggestions yet.</p>
+          <p style={{ color: "var(--muted)", margin: 0 }}>No suggestions found. Press Enter to search the best match.</p>
         ) : null}
         {results.map((result) => (
           <button
