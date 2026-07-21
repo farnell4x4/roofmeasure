@@ -4,7 +4,7 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 READY_URL="${READY_URL:-http://localhost:3000}"
-APP_URL="${APP_URL:-http://localhost:3000/mapkit-test}"
+APP_URL="${APP_URL:-http://localhost:3000}"
 LOG_FILE="${TMPDIR:-/tmp}/roofmeasure-dev.log"
 PID_FILE="${TMPDIR:-/tmp}/roofmeasure-dev.pid"
 
