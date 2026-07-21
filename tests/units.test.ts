@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { feetToMeters, formatArea, formatLength } from "@/lib/units";
+import { feetToMeters, formatArea, formatLength } from "@/lib/measurement/units";
 
 describe("unit formatting", () => {
   it("converts feet to meters", () => {

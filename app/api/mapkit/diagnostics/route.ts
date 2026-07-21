@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getMapKitEnvDiagnostics } from "@/lib/env";
+import { getMapKitEnvDiagnostics } from "@/lib/config/env";
 
 export const dynamic = "force-dynamic";
 

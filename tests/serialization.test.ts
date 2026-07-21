@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createEmptyProject } from "@/lib/project-factory";
-import { deserializeProject, serializeProject } from "@/lib/serialization";
+import { createEmptyProject } from "@/lib/projects/project-factory";
+import { deserializeProject, serializeProject } from "@/lib/projects/serialization";
 
 describe("serialization", () => {
   it("serializes and deserializes a project", () => {

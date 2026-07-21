@@ -91,18 +91,22 @@ For automatic Git deployments, connect the repo in Cloudflare and use the same b
 ```text
 app/
   api/mapkit/token/route.ts
-  projects/[projectId]/page.tsx
-  projects/[projectId]/report/page.tsx
+  mapkit-test/page.tsx
+  projects/page.tsx
   settings/page.tsx
 components/
-  home/
-  projects/
-  report/
-  settings/
+  app/
+  map/
+  measurement/
+  screens/
   ui/
-  workspace/
 hooks/
 lib/
+  config/
+  mapkit/
+  measurement/
+  persistence/
+  projects/
 tests/
 types/
 ```

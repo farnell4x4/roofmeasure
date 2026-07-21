@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { db } from "@/lib/db";
+import { db } from "@/lib/persistence/db";
 import { AppPreferences } from "@/types/models";
 
 const defaultPreferences: AppPreferences = {

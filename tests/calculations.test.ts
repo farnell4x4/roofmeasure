@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { calculateProjectTotals } from "@/lib/calculations";
-import { createEmptyProject } from "@/lib/project-factory";
+import { calculateProjectTotals } from "@/lib/measurement/calculations";
+import { createEmptyProject } from "@/lib/projects/project-factory";
 
 describe("project totals", () => {
   it("sums linear totals and plane totals", () => {

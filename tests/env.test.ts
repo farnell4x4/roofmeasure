@@ -35,7 +35,7 @@ describe("runtime env helpers", () => {
     process.env.MAPKIT_KEY_ID = "key-from-process";
     process.env.MAPKIT_PRIVATE_KEY = "process-private";
 
-    const { getEnv } = await import("@/lib/env");
+    const { getEnv } = await import("@/lib/config/env");
     const env = await getEnv();
 
     expect(env.appName).toBe("RoofMeasure CF");
@@ -55,7 +55,7 @@ describe("runtime env helpers", () => {
     process.env.MAPKIT_KEY_ID = "key-local";
     process.env.MAPKIT_PRIVATE_KEY = "local-private";
 
-    const { getRuntimeEnvSnapshot } = await import("@/lib/env");
+    const { getRuntimeEnvSnapshot } = await import("@/lib/config/env");
     const env = await getRuntimeEnvSnapshot();
 
     expect(env).toEqual({
@@ -77,7 +77,7 @@ describe("runtime env helpers", () => {
       }
     });
 
-    const { getMapKitEnvDiagnostics } = await import("@/lib/env");
+    const { getMapKitEnvDiagnostics } = await import("@/lib/config/env");
     const diagnostics = await getMapKitEnvDiagnostics();
 
     expect(diagnostics).toEqual({

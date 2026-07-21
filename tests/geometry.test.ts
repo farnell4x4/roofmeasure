@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { haversineDistanceFeet, pitchFactor, polygonAreaSqFt, slopeAdjustedAreaSqFt } from "@/lib/geometry";
+import { haversineDistanceFeet, pitchFactor, polygonAreaSqFt, slopeAdjustedAreaSqFt } from "@/lib/measurement/geometry";
 
 describe("geometry helpers", () => {
   it("calculates haversine distance in feet", () => {

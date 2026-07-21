@@ -1,5 +1,5 @@
-import { SettingsPage } from "@/components/settings/SettingsPage";
+import { SettingsScreen } from "@/components/screens/SettingsScreen";
 
 export default function SettingsRoute() {
-  return <SettingsPage />;
+  return <SettingsScreen />;
 }

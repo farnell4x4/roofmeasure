@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { db } from "@/lib/db";
+import { db } from "@/lib/persistence/db";
 import { Project, SaveState } from "@/types/models";
 
 export function useProjects() {
