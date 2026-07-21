@@ -1,7 +1,7 @@
 "use client";
 
 import { MapPin, Search } from "lucide-react";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   loadMapKit,
   lookupStreetAddressWithBias,
@@ -16,6 +16,12 @@ type LocationPermission = PermissionState | "unsupported";
 const LOCATION_ALERT_DISMISSED_KEY = "roofmeasure.mapkit-test.location-alert-dismissed";
 type MeasurementPoint = { latitude: number; longitude: number };
 type MeasurementSegment = { id: string; start: MeasurementPoint; end: MeasurementPoint };
+type ProjectedMeasurementPoint = MeasurementPoint & {
+  key: string;
+  x: number;
+  y: number;
+  tone: "solid" | "pending";
+};
 
 async function getLocationPermission(): Promise<LocationPermission> {
   if (typeof navigator === "undefined" || !navigator.permissions || typeof navigator.permissions.query !== "function") {
@@ -41,8 +47,21 @@ async function requestCurrentLocation() {
 }
 
 export default function MapKitTestPage() {
+  const mapViewportRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<InstanceType<NonNullable<NonNullable<Window["mapkit"]>["Map"]>> | null>(null);
+  const superZoomDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    dragging: boolean;
+  } | null>(null);
+  const measurementPointDragRef = useRef<{
+    pointerId: number;
+    sourcePoint: MeasurementPoint;
+  } | null>(null);
   const hasCenteredOnUserLocationRef = useRef(false);
   const selectedPlaceAnnotationRef = useRef<unknown>(null);
   const currentLocationAnnotationRef = useRef<unknown>(null);
@@ -78,11 +97,16 @@ export default function MapKitTestPage() {
   const [pendingLineStart, setPendingLineStart] = useState<MeasurementPoint | null>(null);
   const [pendingModeDecisionPoint, setPendingModeDecisionPoint] = useState<MeasurementPoint | null>(null);
   const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] = useState(false);
+  const [superZoomScale, setSuperZoomScale] = useState(1);
+  const [superZoomOffsetX, setSuperZoomOffsetX] = useState(0);
+  const [superZoomOffsetY, setSuperZoomOffsetY] = useState(0);
+  const [projectionRevision, setProjectionRevision] = useState(0);
   const [locationState, setLocationState] = useState<
     "idle" | "requesting" | "granted" | "denied" | "unsupported" | "error" | "prompt"
   >("idle");
   const [locationAlert, setLocationAlert] = useState("");
   const [isLocationAlertDismissed, setIsLocationAlertDismissed] = useState(false);
+  const superZoomActive = superZoomScale > 1;
 
   const safariLocationHelp =
     'In Safari, open Website Settings for this page and change Location to "Allow", then reload this page.';
@@ -118,6 +142,40 @@ export default function MapKitTestPage() {
     setIsMeasurementSettingsOpen(false);
   }
 
+  function clampSuperZoomOffsets(scale: number, offsetX: number, offsetY: number) {
+    const bounds = mapViewportRef.current?.getBoundingClientRect();
+    if (!bounds || scale <= 1) {
+      return { x: 0, y: 0 };
+    }
+
+    const minX = bounds.width - bounds.width * scale;
+    const minY = bounds.height - bounds.height * scale;
+
+    return {
+      x: Math.min(0, Math.max(minX, offsetX)),
+      y: Math.min(0, Math.max(minY, offsetY))
+    };
+  }
+
+  function resetSuperZoom() {
+    setSuperZoomScale(1);
+    setSuperZoomOffsetX(0);
+    setSuperZoomOffsetY(0);
+    superZoomDragRef.current = null;
+  }
+
+  function setSuperZoomLevel(nextScale: number) {
+    if (nextScale <= 1) {
+      resetSuperZoom();
+      return;
+    }
+
+    const clampedOffsets = clampSuperZoomOffsets(nextScale, superZoomOffsetX, superZoomOffsetY);
+    setSuperZoomScale(nextScale);
+    setSuperZoomOffsetX(clampedOffsets.x);
+    setSuperZoomOffsetY(clampedOffsets.y);
+  }
+
   function getLastMeasuredEndpoint() {
     const lastSegment = measurementSegments[measurementSegments.length - 1];
     return lastSegment?.end ?? null;
@@ -132,6 +190,77 @@ export default function MapKitTestPage() {
         end
       }
     ]);
+  }
+
+  function pointKey(point: MeasurementPoint) {
+    return `${point.latitude.toFixed(7)}:${point.longitude.toFixed(7)}`;
+  }
+
+  function updateMeasurementPointsMatching(sourcePoint: MeasurementPoint, nextPoint: MeasurementPoint) {
+    const sourceKey = pointKey(sourcePoint);
+
+    setMeasurementSegments((currentSegments) =>
+      currentSegments.map((segment) => ({
+        ...segment,
+        start: pointKey(segment.start) === sourceKey ? nextPoint : segment.start,
+        end: pointKey(segment.end) === sourceKey ? nextPoint : segment.end
+      }))
+    );
+    setPendingLineStart((currentPoint) => (currentPoint && pointKey(currentPoint) === sourceKey ? nextPoint : currentPoint));
+    setPendingModeDecisionPoint((currentPoint) => (currentPoint && pointKey(currentPoint) === sourceKey ? nextPoint : currentPoint));
+  }
+
+  function handleTappedCoordinate(tappedPoint: MeasurementPoint) {
+    if (!measurementSegments.length) {
+      if (!pendingLineStart) {
+        setPendingLineStart(tappedPoint);
+        return;
+      }
+
+      appendMeasurementSegment(pendingLineStart, tappedPoint);
+      if (measurementMode === "continuous") {
+        setPendingLineStart(tappedPoint);
+      } else {
+        setPendingLineStart(null);
+      }
+      return;
+    }
+
+    if (measurementMode === null) {
+      setPendingModeDecisionPoint(tappedPoint);
+      return;
+    }
+
+    if (measurementMode === "continuous") {
+      const startPoint = pendingLineStart ?? getLastMeasuredEndpoint();
+      if (!startPoint) {
+        setPendingLineStart(tappedPoint);
+        return;
+      }
+
+      appendMeasurementSegment(startPoint, tappedPoint);
+      setPendingLineStart(tappedPoint);
+      return;
+    }
+
+    if (!pendingLineStart) {
+      setPendingLineStart(tappedPoint);
+      return;
+    }
+
+    appendMeasurementSegment(pendingLineStart, tappedPoint);
+    setPendingLineStart(null);
+  }
+
+  function handlePointOnPage(pointOnPage: DOMPoint) {
+    const map = mapInstanceRef.current;
+    if (!map || pendingModeDecisionPoint) return;
+
+    const coordinate = map.convertPointOnPageToCoordinate(pointOnPage);
+    handleTappedCoordinate({
+      latitude: coordinate.latitude ?? 0,
+      longitude: coordinate.longitude ?? 0
+    });
   }
 
   function applyMeasurementModeChoice(mode: MeasureContinuationMode) {
@@ -183,6 +312,7 @@ export default function MapKitTestPage() {
     if (!mapkit || !map) return;
 
     clearMeasurementVisuals();
+    if (superZoomActive) return;
 
     const pointAnnotations: unknown[] = [];
     const lineOverlays: unknown[] = [];
@@ -300,6 +430,103 @@ export default function MapKitTestPage() {
     measurementLineOverlayRefs.current = lineOverlays;
     measurementLabelAnnotationRefs.current = labelAnnotations;
   }
+
+  const projectedMeasurementOverlay = useMemo(() => {
+    const mapkit = window.mapkit;
+    const map = mapInstanceRef.current;
+    const bounds = mapViewportRef.current?.getBoundingClientRect();
+    if (!mapkit || !map || !bounds) {
+      return {
+        segments: [] as Array<{
+          id: string;
+          startX: number;
+          startY: number;
+          endX: number;
+          endY: number;
+          labelX: number;
+          labelY: number;
+          label: string;
+        }>,
+        points: [] as ProjectedMeasurementPoint[]
+      };
+    }
+
+    const coordinateCtor = mapkit.Coordinate;
+    const points = new Map<string, ProjectedMeasurementPoint>();
+    const segments = measurementSegments.map((segment) => {
+      const startPagePoint = map.convertCoordinateToPointOnPage(
+        new coordinateCtor(segment.start.latitude, segment.start.longitude)
+      );
+      const endPagePoint = map.convertCoordinateToPointOnPage(
+        new coordinateCtor(segment.end.latitude, segment.end.longitude)
+      );
+      const startX = startPagePoint.x - bounds.left;
+      const startY = startPagePoint.y - bounds.top;
+      const endX = endPagePoint.x - bounds.left;
+      const endY = endPagePoint.y - bounds.top;
+      const dx = endX - startX;
+      const dy = endY - startY;
+      const length = Math.hypot(dx, dy) || 1;
+      const offsetX = (-dy / length) * 34;
+      const offsetY = (dx / length) * 34;
+      const startKey = pointKey(segment.start);
+      const endKey = pointKey(segment.end);
+
+      if (!points.has(startKey)) {
+        points.set(startKey, {
+          ...segment.start,
+          key: startKey,
+          x: startX,
+          y: startY,
+          tone: "solid"
+        });
+      }
+
+      if (!points.has(endKey)) {
+        points.set(endKey, {
+          ...segment.end,
+          key: endKey,
+          x: endX,
+          y: endY,
+          tone: "solid"
+        });
+      }
+
+      return {
+        id: segment.id,
+        startX,
+        startY,
+        endX,
+        endY,
+        labelX: (startX + endX) / 2 + offsetX,
+        labelY: (startY + endY) / 2 + offsetY,
+        label: `${Math.round(
+          haversineDistanceFeet(
+            { lat: segment.start.latitude, lng: segment.start.longitude },
+            { lat: segment.end.latitude, lng: segment.end.longitude }
+          )
+        )}'`
+      };
+    });
+
+    if (pendingLineStart) {
+      const pendingPagePoint = map.convertCoordinateToPointOnPage(
+        new coordinateCtor(pendingLineStart.latitude, pendingLineStart.longitude)
+      );
+      points.set(pointKey(pendingLineStart), {
+        ...pendingLineStart,
+        key: pointKey(pendingLineStart),
+        x: pendingPagePoint.x - bounds.left,
+        y: pendingPagePoint.y - bounds.top,
+        tone: "pending"
+      });
+    }
+
+    return {
+      segments,
+      points: Array.from(points.values())
+    };
+  }, [measurementSegments, pendingLineStart, projectionRevision]);
 
   function syncSelectedPlaceAnnotation(place: { latitude: number; longitude: number } | null) {
     const mapkit = window.mapkit;
@@ -446,6 +673,30 @@ export default function MapKitTestPage() {
       mapInstanceRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!mapReady || !mapViewportRef.current || !mapInstanceRef.current) return;
+
+    function refreshProjectionMetrics() {
+      setProjectionRevision((current) => current + 1);
+    }
+
+    const map = mapInstanceRef.current;
+    map.addEventListener("region-change-end", refreshProjectionMetrics);
+    map.addEventListener("scroll-end", refreshProjectionMetrics);
+    map.addEventListener("zoom-end", refreshProjectionMetrics);
+
+    const resizeObserver = new ResizeObserver(refreshProjectionMetrics);
+    resizeObserver.observe(mapViewportRef.current);
+    refreshProjectionMetrics();
+
+    return () => {
+      map.removeEventListener("region-change-end", refreshProjectionMetrics);
+      map.removeEventListener("scroll-end", refreshProjectionMetrics);
+      map.removeEventListener("zoom-end", refreshProjectionMetrics);
+      resizeObserver.disconnect();
+    };
+  }, [mapReady]);
 
   useEffect(() => {
     let permissionStatus: PermissionStatus | null = null;
@@ -635,73 +886,36 @@ export default function MapKitTestPage() {
     if (!mapReady || !mapRef.current || !mapInstanceRef.current) return;
 
     function handleMapTap(event: Record<string, unknown>) {
-      if (pendingModeDecisionPoint) return;
-
-      const map = mapInstanceRef.current;
-      if (!map) return;
-
       const pointOnPage = event.pointOnPage as DOMPoint | undefined;
       if (!pointOnPage) return;
-
-      const coordinate = map.convertPointOnPageToCoordinate(pointOnPage);
-      const tappedPoint = {
-        latitude: coordinate.latitude ?? 0,
-        longitude: coordinate.longitude ?? 0
-      };
-
-      if (!measurementSegments.length) {
-        if (!pendingLineStart) {
-          setPendingLineStart(tappedPoint);
-          return;
-        }
-
-        appendMeasurementSegment(pendingLineStart, tappedPoint);
-        if (measurementMode === "continuous") {
-          setPendingLineStart(tappedPoint);
-        } else {
-          setPendingLineStart(null);
-        }
-        return;
-      }
-
-      if (measurementMode === null) {
-        setPendingModeDecisionPoint(tappedPoint);
-        return;
-      }
-
-      if (measurementMode === "continuous") {
-        const startPoint = pendingLineStart ?? getLastMeasuredEndpoint();
-        if (!startPoint) {
-          setPendingLineStart(tappedPoint);
-          return;
-        }
-
-        appendMeasurementSegment(startPoint, tappedPoint);
-        setPendingLineStart(tappedPoint);
-        return;
-      }
-
-      if (!pendingLineStart) {
-        setPendingLineStart(tappedPoint);
-        return;
-      }
-
-      appendMeasurementSegment(pendingLineStart, tappedPoint);
-      setPendingLineStart(null);
+      handlePointOnPage(pointOnPage);
     }
 
     const map = mapInstanceRef.current;
+    if (superZoomActive) {
+      return;
+    }
     map.addEventListener("single-tap", handleMapTap);
 
     return () => {
       map.removeEventListener("single-tap", handleMapTap);
     };
-  }, [mapReady, measurementMode, measurementSegments, pendingLineStart, pendingModeDecisionPoint]);
+  }, [mapReady, pendingModeDecisionPoint, pendingLineStart, measurementMode, measurementSegments, superZoomActive]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    map.isScrollEnabled = !superZoomActive;
+    map.isZoomEnabled = !superZoomActive;
+    map.isRotationEnabled = !superZoomActive;
+    map.isPitchEnabled = !superZoomActive;
+  }, [superZoomActive]);
 
   useEffect(() => {
     if (!mapReady) return;
     syncMeasurementVisuals();
-  }, [mapReady, measurementSegments, pendingLineStart]);
+  }, [mapReady, measurementSegments, pendingLineStart, superZoomActive]);
 
   async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -736,6 +950,7 @@ export default function MapKitTestPage() {
         return;
       }
 
+      resetSuperZoom();
       recenterMap(bestMatch.latitude, bestMatch.longitude, 0.003, 0.003);
       switchMapToSatelliteAfterSearch();
       setSelectedPlace({
@@ -764,6 +979,7 @@ export default function MapKitTestPage() {
 
     try {
       if (typeof suggestion.latitude === "number" && typeof suggestion.longitude === "number" && !suggestion.mapkitResult) {
+        resetSuperZoom();
         recenterMap(suggestion.latitude, suggestion.longitude, 0.003, 0.003);
         switchMapToSatelliteAfterSearch();
         setSelectedPlace({
@@ -799,6 +1015,7 @@ export default function MapKitTestPage() {
         return;
       }
 
+      resetSuperZoom();
       recenterMap(bestMatch.latitude, bestMatch.longitude, 0.003, 0.003);
       switchMapToSatelliteAfterSearch();
       setSelectedPlace({
@@ -816,6 +1033,119 @@ export default function MapKitTestPage() {
       console.error("Suggestion lookup failed:", error);
       setSearchState("error");
       setSearchMessage(error instanceof Error ? error.message : "Address lookup failed.");
+    }
+  }
+
+  function handleSuperZoomPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!superZoomActive) return;
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    superZoomDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: superZoomOffsetX,
+      originY: superZoomOffsetY,
+      dragging: false
+    };
+  }
+
+  function handleSuperZoomPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = superZoomDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !superZoomActive) return;
+
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.dragging && Math.hypot(deltaX, deltaY) > 4) {
+      drag.dragging = true;
+    }
+
+    if (!drag.dragging) return;
+
+    const clampedOffsets = clampSuperZoomOffsets(superZoomScale, drag.originX + deltaX, drag.originY + deltaY);
+    setSuperZoomOffsetX(clampedOffsets.x);
+    setSuperZoomOffsetY(clampedOffsets.y);
+  }
+
+  function handleSuperZoomPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = superZoomDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !superZoomActive) return;
+
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    superZoomDragRef.current = null;
+
+    if (drag.dragging) return;
+
+    const bounds = mapViewportRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+
+    const originalX = (event.clientX - bounds.left - superZoomOffsetX) / superZoomScale;
+    const originalY = (event.clientY - bounds.top - superZoomOffsetY) / superZoomScale;
+    handlePointOnPage(new DOMPoint(bounds.left + originalX, bounds.top + originalY));
+  }
+
+  function handleSuperZoomPointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
+    if (superZoomDragRef.current?.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      superZoomDragRef.current = null;
+    }
+  }
+
+  function getSuperZoomOriginalPagePoint(clientX: number, clientY: number) {
+    const bounds = mapViewportRef.current?.getBoundingClientRect();
+    if (!bounds) return null;
+
+    const originalX = (clientX - bounds.left - superZoomOffsetX) / superZoomScale;
+    const originalY = (clientY - bounds.top - superZoomOffsetY) / superZoomScale;
+    return new DOMPoint(bounds.left + originalX, bounds.top + originalY);
+  }
+
+  function handleMeasurementPointPointerDown(event: ReactPointerEvent<HTMLButtonElement>, point: MeasurementPoint) {
+    event.stopPropagation();
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    measurementPointDragRef.current = {
+      pointerId: event.pointerId,
+      sourcePoint: point
+    };
+  }
+
+  function handleMeasurementPointPointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = measurementPointDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !superZoomActive) return;
+
+    event.stopPropagation();
+    event.preventDefault();
+
+    const map = mapInstanceRef.current;
+    const originalPoint = getSuperZoomOriginalPagePoint(event.clientX, event.clientY);
+    if (!map || !originalPoint) return;
+
+    const coordinate = map.convertPointOnPageToCoordinate(originalPoint);
+    const nextPoint = {
+      latitude: coordinate.latitude ?? drag.sourcePoint.latitude,
+      longitude: coordinate.longitude ?? drag.sourcePoint.longitude
+    };
+    updateMeasurementPointsMatching(drag.sourcePoint, nextPoint);
+    drag.sourcePoint = nextPoint;
+  }
+
+  function handleMeasurementPointPointerUp(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = measurementPointDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    event.stopPropagation();
+    event.preventDefault();
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    measurementPointDragRef.current = null;
+  }
+
+  function handleMeasurementPointPointerCancel(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (measurementPointDragRef.current?.pointerId === event.pointerId) {
+      event.stopPropagation();
+      event.preventDefault();
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      measurementPointDragRef.current = null;
     }
   }
 
@@ -1067,9 +1397,9 @@ export default function MapKitTestPage() {
               borderRadius: 16,
               background: "rgba(255, 255, 255, 0.96)",
               border: "1px solid rgba(31, 37, 34, 0.12)",
-              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
-            }}
-          >
+            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+          }}
+        >
             <button
               type="button"
               onClick={() => {
@@ -1108,6 +1438,67 @@ export default function MapKitTestPage() {
             >
               New Line
             </button>
+            <div
+              style={{
+                height: 1,
+                background: "rgba(31, 37, 34, 0.12)",
+                margin: "2px 0"
+              }}
+            />
+            <div style={{ padding: "2px 4px", fontSize: 12, fontWeight: 700, color: "#5f685f", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              Super Zoom
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+              {[1, 1.5, 2, 3].map((scale) => {
+                const active = superZoomScale === scale;
+                return (
+                  <button
+                    key={scale}
+                    type="button"
+                    onClick={() => setSuperZoomLevel(scale)}
+                    style={{
+                      border: 0,
+                      borderRadius: 12,
+                      padding: "10px 12px",
+                      background: active ? "#1f2522" : "rgba(31, 37, 34, 0.08)",
+                      color: active ? "#fff" : "#1f2522",
+                      cursor: "pointer"
+                    }}
+                  >
+                    {scale}x
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={resetSuperZoom}
+              style={{
+                border: 0,
+                borderRadius: 12,
+                padding: "10px 12px",
+                background: "rgba(31, 37, 34, 0.08)",
+                color: "#1f2522",
+                cursor: "pointer"
+              }}
+            >
+              Reset View
+            </button>
+          </div>
+        ) : null}
+        {superZoomActive ? (
+          <div
+            style={{
+              padding: "8px 12px",
+              borderRadius: 999,
+              background: "rgba(31, 37, 34, 0.88)",
+              color: "#fff",
+              fontSize: 12,
+              fontWeight: 700,
+              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+            }}
+          >
+            Super Zoom {superZoomScale}x
           </div>
         ) : null}
         {pendingModeDecisionPoint ? (
@@ -1158,13 +1549,118 @@ export default function MapKitTestPage() {
         ) : null}
       </div>
       <div
-        ref={mapRef}
+        ref={mapViewportRef}
         style={{
           position: "absolute",
           inset: 0,
-          zIndex: 0
+          zIndex: 0,
+          overflow: "hidden"
         }}
-      />
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            transform: `translate(${superZoomOffsetX}px, ${superZoomOffsetY}px) scale(${superZoomScale})`,
+            transformOrigin: "top left",
+            willChange: superZoomActive ? "transform" : undefined
+          }}
+        >
+          <div
+            ref={mapRef}
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 0
+            }}
+          />
+          {superZoomActive ? (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 2,
+                pointerEvents: "none"
+              }}
+            >
+              <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+                {projectedMeasurementOverlay.segments.map((segment) => (
+                  <g key={segment.id}>
+                    <line
+                      x1={segment.startX}
+                      y1={segment.startY}
+                      x2={segment.endX}
+                      y2={segment.endY}
+                      stroke="#1f2522"
+                      strokeWidth={4}
+                      strokeLinecap="round"
+                    />
+                    <rect
+                      x={segment.labelX - 28}
+                      y={segment.labelY - 12}
+                      width={56}
+                      height={24}
+                      rx={12}
+                      fill="rgba(31, 37, 34, 0.82)"
+                    />
+                    <text
+                      x={segment.labelX}
+                      y={segment.labelY + 4}
+                      fill="#fff"
+                      textAnchor="middle"
+                      fontSize={13}
+                      fontWeight={700}
+                    >
+                      {segment.label}
+                    </text>
+                  </g>
+                ))}
+              </svg>
+              {projectedMeasurementOverlay.points.map((point) => (
+                <button
+                  key={`${point.key}:${point.tone}`}
+                  type="button"
+                  onPointerDown={(event) => handleMeasurementPointPointerDown(event, point)}
+                  onPointerMove={handleMeasurementPointPointerMove}
+                  onPointerUp={handleMeasurementPointPointerUp}
+                  onPointerCancel={handleMeasurementPointPointerCancel}
+                  style={{
+                    position: "absolute",
+                    left: point.x,
+                    top: point.y,
+                    width: point.tone === "pending" ? 22 : 20,
+                    height: point.tone === "pending" ? 22 : 20,
+                    transform: "translate(-50%, -50%)",
+                    borderRadius: 999,
+                    border: point.tone === "pending" ? "3px solid #1f2522" : "3px solid rgba(255,255,255,0.95)",
+                    background: point.tone === "pending" ? "#ffffff" : "#1f2522",
+                    boxShadow: "0 6px 18px rgba(20, 24, 22, 0.22)",
+                    cursor: "grab",
+                    pointerEvents: "auto",
+                    touchAction: "none"
+                  }}
+                  aria-label="Move measurement point"
+                />
+              ))}
+            </div>
+          ) : null}
+        </div>
+        {superZoomActive ? (
+          <div
+            onPointerDown={handleSuperZoomPointerDown}
+            onPointerMove={handleSuperZoomPointerMove}
+            onPointerUp={handleSuperZoomPointerUp}
+            onPointerCancel={handleSuperZoomPointerCancel}
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 1,
+              touchAction: "none",
+              cursor: superZoomDragRef.current?.dragging ? "grabbing" : "grab"
+            }}
+          />
+        ) : null}
+      </div>
     </main>
   );
 }

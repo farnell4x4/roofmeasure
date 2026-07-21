@@ -158,6 +158,8 @@ declare global {
         options: {
           showsCompass?: "visible" | "hidden" | "adaptive";
           showsMapTypeControl?: boolean;
+          isScrollEnabled?: boolean;
+          isZoomEnabled?: boolean;
           isRotationEnabled?: boolean;
           isPitchEnabled?: boolean;
           mapType?: "satellite" | "hybrid" | "mutedStandard" | "standard";
@@ -166,6 +168,10 @@ declare global {
       ) => {
         region: MapKitCoordinateRegion;
         mapType: "satellite" | "hybrid" | "mutedStandard" | "standard";
+        isScrollEnabled?: boolean;
+        isZoomEnabled?: boolean;
+        isRotationEnabled?: boolean;
+        isPitchEnabled?: boolean;
         addAnnotation: (annotation: unknown) => unknown;
         removeAnnotation: (annotation: unknown) => void;
         addOverlay: (overlay: unknown) => unknown;
