@@ -23,6 +23,11 @@ type MapKitAutocompleteResult = {
   subtitle?: string;
   name?: string;
   formattedAddress?: string;
+  fullThoroughfare?: string;
+  thoroughfare?: string;
+  subThoroughfare?: string;
+  locality?: string;
+  postCode?: string;
   coordinate?: MapKitCoordinate;
 };
 
@@ -32,12 +37,22 @@ type MapKitPlace = {
   title?: string;
   subtitle?: string;
   displayLines?: string[];
+  fullThoroughfare?: string;
+  thoroughfare?: string;
+  subThoroughfare?: string;
+  locality?: string;
+  postCode?: string;
   coordinate?: MapKitCoordinate;
 };
 
 type MapKitGeocoderResult = {
   name?: string;
   formattedAddress?: string;
+  fullThoroughfare?: string;
+  thoroughfare?: string;
+  subThoroughfare?: string;
+  locality?: string;
+  postCode?: string;
   coordinate: {
     latitude: number;
     longitude: number;
@@ -48,9 +63,23 @@ type MapKitSearchOptions = {
   includeAddresses?: boolean;
   includePointsOfInterest?: boolean;
   includePhysicalFeatures?: boolean;
+  includeQueries?: boolean;
   signal?: AbortSignal;
   region?: MapKitCoordinateRegion;
   limitToCountries?: string | string[];
+  regionPriority?: "default" | "required";
+};
+
+type MapKitSearchConstructorOptions = {
+  language?: string;
+  includeAddresses?: boolean;
+  includePointsOfInterest?: boolean;
+  includePhysicalFeatures?: boolean;
+  includeQueries?: boolean;
+  limitToCountries?: string | string[];
+  getsUserLocation?: boolean;
+  region?: MapKitCoordinateRegion;
+  regionPriority?: "default" | "required";
 };
 
 type SearchBias = {
@@ -94,11 +123,21 @@ declare global {
         destroy: () => void;
       };
       FeatureVisibility: { Hidden: string };
-      Search?: new (options?: { language?: string }) => {
-        autocomplete: (
-          query: string,
-          options?: MapKitSearchOptions
-        ) => Promise<{ results?: MapKitAutocompleteResult[] }>;
+      Search?: new (options?: MapKitSearchConstructorOptions) => {
+        autocomplete: {
+          (
+            query: string,
+            callback: (
+              error: Error | null,
+              data: { results?: MapKitAutocompleteResult[] } | null
+            ) => void,
+            options?: MapKitSearchOptions
+          ): Promise<{ results?: MapKitAutocompleteResult[] }>;
+          (
+            query: string,
+            options?: MapKitSearchOptions
+          ): Promise<{ results?: MapKitAutocompleteResult[] }>;
+        };
         search: {
           (
             query: string | MapKitAutocompleteResult,
@@ -121,10 +160,20 @@ declare global {
             callback: (
               error: Error | null,
               data: { results?: MapKitGeocoderResult[] } | null
-            ) => void
+            ) => void,
+            options?: {
+              coordinate?: MapKitCoordinate;
+              region?: MapKitCoordinateRegion;
+              language?: string;
+            }
           ): Promise<{ results?: MapKitGeocoderResult[] }>;
           (
-            query: string
+            query: string,
+            options?: {
+              coordinate?: MapKitCoordinate;
+              region?: MapKitCoordinateRegion;
+              language?: string;
+            }
           ): Promise<{ results?: MapKitGeocoderResult[] }>;
         };
       };
@@ -293,14 +342,23 @@ export function createMapKitRegion(centerLat: number, centerLng: number, latSpan
   return new window.mapkit.CoordinateRegion(center, span);
 }
 
-function createSearch() {
+function createSearch(bias?: SearchBias) {
   if (!window.mapkit?.Search) return null;
-  return new window.mapkit.Search({ language: "en" });
+  return new window.mapkit.Search({
+    language: "en",
+    includeAddresses: true,
+    includePointsOfInterest: false,
+    includeQueries: false,
+    limitToCountries: "US",
+    getsUserLocation: true,
+    region: createBiasRegion(bias) ?? undefined,
+    regionPriority: "default"
+  });
 }
 
 function createGeocoder() {
   if (!window.mapkit?.Geocoder) return null;
-  return new window.mapkit.Geocoder({ language: "en" });
+  return new window.mapkit.Geocoder({ language: "en", getsUserLocation: true } as { language: string; getsUserLocation: boolean });
 }
 
 function createBiasRegion(bias?: SearchBias) {
@@ -314,10 +372,41 @@ function createSearchOptions(signal?: AbortSignal, bias?: SearchBias): MapKitSea
     includeAddresses: true,
     includePointsOfInterest: false,
     includePhysicalFeatures: false,
+    includeQueries: false,
     signal,
     region: createBiasRegion(bias),
-    ...(bias?.countryCode ? { limitToCountries: [bias.countryCode] } : {})
+    limitToCountries: bias?.countryCode ?? "US"
   };
+}
+
+function createAbortError() {
+  return new DOMException("The operation was aborted.", "AbortError");
+}
+
+function bindAbortSignal<T>(
+  signal: AbortSignal | undefined,
+  executor: (resolve: (value: T) => void, reject: (reason?: unknown) => void) => void
+) {
+  return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError());
+      return;
+    }
+
+    const onAbort = () => reject(createAbortError());
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    executor(
+      (value) => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (reason) => {
+        signal?.removeEventListener("abort", onAbort);
+        reject(reason);
+      }
+    );
+  });
 }
 
 function toAddressSuggestion(
@@ -341,12 +430,28 @@ function toAddressSuggestion(
 export async function searchAddressSuggestions(query: string, signal?: AbortSignal, bias?: SearchBias) {
   if (!query.trim()) return [];
   await loadMapKit();
-  const search = createSearch();
+  const search = createSearch(bias);
   if (!search) return [];
 
-  const response = await search.autocomplete(query, createSearchOptions(signal, bias));
+  const autocompletePromise = bindAbortSignal<{ results?: MapKitAutocompleteResult[] }>(signal, (resolve, reject) => {
+    void search.autocomplete(
+      query,
+      (error, data) => {
+        if (error) {
+          reject(error);
+          return;
+        }
 
-  return (response.results ?? []).map((result, index) => toAddressSuggestion(result, `${query}-${index}`));
+        resolve(data ?? {});
+      },
+      createSearchOptions(undefined, bias)
+    );
+  });
+  const autocompleteResponse = await autocompletePromise;
+
+  return (autocompleteResponse.results ?? [])
+    .map((result, index) => toAddressSuggestion(result, `${query}-${index}`))
+    .slice(0, 8);
 }
 
 export async function searchBestAddressMatch(
@@ -358,10 +463,10 @@ export async function searchBestAddressMatch(
   if (!normalizedQuery) return null;
 
   await loadMapKit();
-  const search = createSearch();
+  const search = createSearch(bias);
   if (!search) return null;
 
-  const response = await new Promise<{ places?: MapKitPlace[] }>((resolve, reject) => {
+  const response = await bindAbortSignal<{ places?: MapKitPlace[] }>(signal, (resolve, reject) => {
     void search.search(
       typeof query === "string" ? normalizedQuery : (query.mapkitResult as MapKitAutocompleteResult | undefined) ?? normalizedQuery,
       (error, data) => {
@@ -371,7 +476,7 @@ export async function searchBestAddressMatch(
         }
         resolve(data ?? {});
       },
-      createSearchOptions(signal, bias)
+      createSearchOptions(undefined, bias)
     );
   });
 
@@ -380,6 +485,10 @@ export async function searchBestAddressMatch(
 }
 
 export async function lookupStreetAddress(address: string): Promise<AddressSuggestion[]> {
+  return lookupStreetAddressWithBias(address);
+}
+
+export async function lookupStreetAddressWithBias(address: string, bias?: SearchBias): Promise<AddressSuggestion[]> {
   const trimmedAddress = address.trim();
   if (!trimmedAddress) {
     throw new Error("Address is required.");
@@ -392,14 +501,25 @@ export async function lookupStreetAddress(address: string): Promise<AddressSugge
   }
 
   const response = await new Promise<{ results?: MapKitGeocoderResult[] }>((resolve, reject) => {
-    void geocoder.lookup(trimmedAddress, (error, data) => {
-      if (error) {
-        reject(error);
-        return;
-      }
+    const options = bias
+      ? {
+          coordinate: { latitude: bias.centerLat, longitude: bias.centerLng },
+          region: createBiasRegion(bias) ?? undefined,
+          language: "en"
+        }
+      : undefined;
+    void geocoder.lookup(
+      trimmedAddress,
+      (error, data) => {
+        if (error) {
+          reject(error);
+          return;
+        }
 
-      resolve(data ?? {});
-    });
+        resolve(data ?? {});
+      },
+      options
+    );
   });
   const places = response.results ?? [];
 
