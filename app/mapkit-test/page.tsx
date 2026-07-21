@@ -26,8 +26,13 @@ export default function MapKitTestPage() {
     lngSpan: number;
     countryCode?: string;
   } | null>(null);
-  const [locationState, setLocationState] = useState<"idle" | "requesting" | "granted" | "denied" | "unsupported">("idle");
+  const [locationState, setLocationState] = useState<
+    "idle" | "requesting" | "granted" | "denied" | "unsupported" | "error" | "prompt"
+  >("idle");
   const [locationAlert, setLocationAlert] = useState("");
+
+  const safariLocationHelp =
+    'In Safari, open Website Settings for this page and change Location to "Allow", then reload this page.';
 
   async function requestLocationBias() {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
@@ -54,12 +59,12 @@ export default function MapKitTestPage() {
         if (error.code === error.PERMISSION_DENIED) {
           setLocationState("denied");
           setLocationAlert(
-            "Location access is denied for this site. Enable Location Services for Safari and allow this website to improve nearby address suggestions."
+            `Location access is denied for this site. ${safariLocationHelp}`
           );
           return;
         }
 
-        setLocationState("idle");
+        setLocationState("error");
         setLocationAlert("We could not get your location right now. Search will continue without local bias.");
       },
       {
@@ -123,24 +128,27 @@ export default function MapKitTestPage() {
           }
 
           if (status.state === "prompt") {
-            void requestLocationBias();
+            setLocationState("prompt");
+            setLocationAlert("Allow location to improve nearby address suggestions.");
             return;
           }
 
           if (status.state === "denied") {
             setLocationState("denied");
             setLocationAlert(
-              "Location access is denied for this site. Enable Location Services for Safari and allow this website to improve nearby address suggestions."
+              `Location access is denied for this site. ${safariLocationHelp}`
             );
             return;
           }
         } catch {
-          void requestLocationBias();
+          setLocationState("prompt");
+          setLocationAlert("Allow location to improve nearby address suggestions.");
           return;
         }
       }
 
-      void requestLocationBias();
+      setLocationState("prompt");
+      setLocationAlert("Allow location to improve nearby address suggestions.");
     }
 
     void requestLocation();
@@ -344,21 +352,28 @@ export default function MapKitTestPage() {
               Location access
             </div>
             <div style={{ fontSize: 14 }}>{locationAlert}</div>
-            <button
-              type="button"
-              onClick={() => void requestLocationBias()}
-              style={{
-                justifySelf: "start",
-                borderRadius: 12,
-                border: "1px solid rgba(95, 59, 22, 0.18)",
-                background: "rgba(255,255,255,0.9)",
-                padding: "8px 10px",
-                color: "#5f3b16",
-                cursor: "pointer"
-              }}
-            >
-              Try location again
-            </button>
+            {locationState === "prompt" || locationState === "error" || locationState === "idle" ? (
+              <button
+                type="button"
+                onClick={() => void requestLocationBias()}
+                style={{
+                  justifySelf: "start",
+                  borderRadius: 12,
+                  border: "1px solid rgba(95, 59, 22, 0.18)",
+                  background: "rgba(255,255,255,0.9)",
+                  padding: "8px 10px",
+                  color: "#5f3b16",
+                  cursor: "pointer"
+                }}
+              >
+                Use my location
+              </button>
+            ) : null}
+            {locationState === "denied" ? (
+              <div style={{ fontSize: 13, color: "#6d4a22" }}>
+                Open Safari page settings for `localhost`, allow Location, then reload.
+              </div>
+            ) : null}
           </div>
         ) : null}
         <div
