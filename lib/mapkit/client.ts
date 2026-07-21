@@ -35,6 +35,15 @@ type MapKitPlace = {
   coordinate?: MapKitCoordinate;
 };
 
+type MapKitGeocoderResult = {
+  name?: string;
+  formattedAddress?: string;
+  coordinate: {
+    latitude: number;
+    longitude: number;
+  };
+};
+
 type MapKitSearchOptions = {
   includeAddresses?: boolean;
   includePointsOfInterest?: boolean;
@@ -105,6 +114,20 @@ declare global {
           ): Promise<{ places?: MapKitPlace[] }>;
         };
       };
+      Geocoder?: new (options?: { language?: string }) => {
+        lookup: {
+          (
+            query: string,
+            callback: (
+              error: Error | null,
+              data: { results?: MapKitGeocoderResult[] } | null
+            ) => void
+          ): Promise<{ results?: MapKitGeocoderResult[] }>;
+          (
+            query: string
+          ): Promise<{ results?: MapKitGeocoderResult[] }>;
+        };
+      };
     };
   }
 }
@@ -115,6 +138,17 @@ const MAPKIT_SCRIPT_SELECTOR = 'script[data-mapkit-script="true"]';
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+async function waitForMapKitGlobal() {
+  if (window.mapkit) return window.mapkit;
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+    if (window.mapkit) return window.mapkit;
+  }
+
+  throw new Error("MapKit script loaded but window.mapkit was unavailable.");
 }
 
 async function getMissingMapKitCredentials() {
@@ -196,6 +230,8 @@ export async function loadMapKit() {
             document.head.appendChild(script);
           });
 
+          await waitForMapKitGlobal();
+
           const response = await fetch("/api/mapkit/token", { cache: "no-store" });
           const tokenResponse = (await response.json()) as MapKitTokenResponse;
           if (!response.ok || !tokenResponse.ok || !tokenResponse.token || !window.mapkit) {
@@ -260,6 +296,11 @@ export function createMapKitRegion(centerLat: number, centerLng: number, latSpan
 function createSearch() {
   if (!window.mapkit?.Search) return null;
   return new window.mapkit.Search({ language: "en" });
+}
+
+function createGeocoder() {
+  if (!window.mapkit?.Geocoder) return null;
+  return new window.mapkit.Geocoder({ language: "en" });
 }
 
 function createBiasRegion(bias?: SearchBias) {
@@ -336,4 +377,39 @@ export async function searchBestAddressMatch(
 
   const bestPlace = response.places?.[0];
   return bestPlace ? toAddressSuggestion(bestPlace, `place-${normalizedQuery}`) : null;
+}
+
+export async function lookupStreetAddress(address: string): Promise<AddressSuggestion[]> {
+  const trimmedAddress = address.trim();
+  if (!trimmedAddress) {
+    throw new Error("Address is required.");
+  }
+
+  await loadMapKit();
+  const geocoder = createGeocoder();
+  if (!geocoder) {
+    throw new Error("MapKit Geocoder is unavailable.");
+  }
+
+  const response = await new Promise<{ results?: MapKitGeocoderResult[] }>((resolve, reject) => {
+    void geocoder.lookup(trimmedAddress, (error, data) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve(data ?? {});
+    });
+  });
+  const places = response.results ?? [];
+
+  return places.map((place, index) => ({
+    id: `geocoder-${trimmedAddress}-${index}`,
+    title: place.name ?? place.formattedAddress ?? trimmedAddress,
+    subtitle: place.formattedAddress ?? "",
+    formattedAddress: place.formattedAddress ?? "",
+    latitude: place.coordinate.latitude,
+    longitude: place.coordinate.longitude,
+    mapkitResult: place
+  }));
 }
