@@ -53,11 +53,12 @@ export function MapViewport({
     if (!mapRef.current) return;
 
     let cancelled = false;
+    const mapkitWindow = window as Window & { mapkit?: NonNullable<Window["mapkit"]> };
 
     async function setupMap() {
       try {
         await loadMapKit();
-        if (cancelled || !mapRef.current || !window.mapkit) return;
+        if (cancelled || !mapRef.current || !mapkitWindow.mapkit) return;
 
         const initialCamera = initialCameraRef.current;
         const region = createMapKitRegion(
@@ -68,13 +69,11 @@ export function MapViewport({
         );
         if (!region) return;
 
-        const map = new window.mapkit.Map(mapRef.current, {
-          mapType: window.mapkit.MapType.Satellite,
+        const map = new mapkitWindow.mapkit.Map(mapRef.current, {
           region,
-          showsMapTypeControl: false,
-          showsCompass: "adaptive",
-          isRotationEnabled: false,
-          isPitchEnabled: false
+          showsCompass: "visible",
+          showsMapTypeControl: true,
+          mapType: mapkitWindow.mapkit.MapType.Standard
         });
 
         mapInstanceRef.current = map;

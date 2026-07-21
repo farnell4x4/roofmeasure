@@ -23,9 +23,9 @@ export function HomePage() {
       setError("Enter a project name to begin.");
       return;
     }
-    const project = await db.saveProject(createEmptyProject(normalized));
+    await db.saveProject(createEmptyProject(normalized));
     push({ title: "Project created locally.", tone: "success" });
-    router.push(`/projects/${project.id}?search=1`);
+    router.push("/mapkit-test");
   }
 
   return (

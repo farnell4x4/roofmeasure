@@ -151,7 +151,7 @@ export function ProjectsPage() {
                 <span>{totals.planeCount} roof planes</span>
               </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <Button onClick={() => router.push(`/projects/${project.id}`)}>
+                <Button onClick={() => router.push("/mapkit-test")}>
                   <FolderOpen size={18} /> Open
                 </Button>
                 <Button variant="secondary" onClick={() => handleDuplicateProject(project.id)}>
