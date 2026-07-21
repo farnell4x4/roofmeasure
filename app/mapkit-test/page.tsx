@@ -565,19 +565,18 @@ export default function MapKitTestPage() {
     function projectMeasurements() {
       const activeMap = mapInstanceRef.current;
       const activeElement = mapRef.current;
-      if (!activeMap || !activeElement) return;
+      const mapkit = window.mapkit;
+      if (!activeMap || !activeElement || !mapkit) return;
 
       const bounds = activeElement.getBoundingClientRect();
       setProjectedMeasurementSegments(
         measurementSegments.map((segment) => {
-          const start = activeMap.convertCoordinateToPointOnPage({
-            latitude: segment.start.latitude,
-            longitude: segment.start.longitude
-          });
-          const end = activeMap.convertCoordinateToPointOnPage({
-            latitude: segment.end.latitude,
-            longitude: segment.end.longitude
-          });
+          const start = activeMap.convertCoordinateToPointOnPage(
+            new mapkit.Coordinate(segment.start.latitude, segment.start.longitude)
+          );
+          const end = activeMap.convertCoordinateToPointOnPage(
+            new mapkit.Coordinate(segment.end.latitude, segment.end.longitude)
+          );
 
           return {
             id: segment.id,
@@ -591,14 +590,12 @@ export default function MapKitTestPage() {
 
       const points: ProjectedMeasurementPoint[] = [];
       measurementSegments.forEach((segment, index) => {
-        const start = activeMap.convertCoordinateToPointOnPage({
-          latitude: segment.start.latitude,
-          longitude: segment.start.longitude
-        });
-        const end = activeMap.convertCoordinateToPointOnPage({
-          latitude: segment.end.latitude,
-          longitude: segment.end.longitude
-        });
+        const start = activeMap.convertCoordinateToPointOnPage(
+          new mapkit.Coordinate(segment.start.latitude, segment.start.longitude)
+        );
+        const end = activeMap.convertCoordinateToPointOnPage(
+          new mapkit.Coordinate(segment.end.latitude, segment.end.longitude)
+        );
 
         if (index === 0) {
           points.push({
@@ -618,10 +615,9 @@ export default function MapKitTestPage() {
       });
 
       if (pendingLineStart) {
-        const pending = activeMap.convertCoordinateToPointOnPage({
-          latitude: pendingLineStart.latitude,
-          longitude: pendingLineStart.longitude
-        });
+        const pending = activeMap.convertCoordinateToPointOnPage(
+          new mapkit.Coordinate(pendingLineStart.latitude, pendingLineStart.longitude)
+        );
         points.push({
           id: "pending-line-start",
           x: pending.x - bounds.left,
