@@ -245,6 +245,7 @@ export function WorkspacePage({ projectId }: { projectId: string }) {
       <section style={{ display: "grid", gap: 14, gridTemplateColumns: "minmax(0, 1fr)", alignItems: "start" }}>
         <AddressSearch
           open={addressSearchOpen}
+          camera={currentProject.mapCamera ?? DEFAULT_CAMERA}
           onSelect={handleAddressSelect}
           onClose={() => setAddressSearchOpen(false)}
         />

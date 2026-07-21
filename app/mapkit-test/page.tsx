@@ -80,6 +80,7 @@ export default function MapKitTestPage() {
   const [searchErrorLog, setSearchErrorLog] = useState("No search callback yet.");
   const [searchDataLog, setSearchDataLog] = useState("No search callback yet.");
   const [searchPlacesLog, setSearchPlacesLog] = useState("No search callback yet.");
+  const [searchTraceLog, setSearchTraceLog] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -231,7 +232,16 @@ export default function MapKitTestPage() {
     if (!normalizedQuery) return;
 
     const mapkitWindow = window as Window & { mapkit?: NonNullable<Window["mapkit"]> };
+    const appendSearchTrace = (message: string) => {
+      const line = `${new Date().toLocaleTimeString()}: ${message}`;
+      console.log(line);
+      setSearchTraceLog((current) => [line, ...current].slice(0, 12));
+    };
+
+    appendSearchTrace("Submit handler started.");
+
     if (!mapkitWindow.mapkit?.Search) {
+      appendSearchTrace("window.mapkit.Search was unavailable.");
       setSearchState("error");
       setSearchMessage("MapKit Search is unavailable on window.mapkit.");
       setFirstResult("");
@@ -247,6 +257,8 @@ export default function MapKitTestPage() {
     setSearchErrorLog("Waiting for callback...");
     setSearchDataLog("Waiting for callback...");
     setSearchPlacesLog("Waiting for callback...");
+    setSearchTraceLog([]);
+    appendSearchTrace(`Prepared callback test for "${normalizedQuery}".`);
 
     const search = new mapkitWindow.mapkit.Search({ language: "en" }) as {
       search: (
@@ -257,9 +269,11 @@ export default function MapKitTestPage() {
     };
 
     try {
+      appendSearchTrace("About to call search.search().");
       void search.search(
         normalizedQuery,
         (error, data) => {
+          appendSearchTrace("Search callback executed.");
           console.log("error:", error);
           console.log("data:", data);
           console.log("places:", data?.places);
@@ -298,7 +312,9 @@ export default function MapKitTestPage() {
         includePhysicalFeatures: false
         }
       );
+      appendSearchTrace("search.search() returned.");
     } catch (error) {
+      appendSearchTrace(`search.search() threw synchronously: ${stringifyError(error)}`);
       console.error("MapKit callback search failed before callback", error);
       setSearchState("error");
       setSearchMessage(stringifyError(error));
@@ -418,6 +434,23 @@ export default function MapKitTestPage() {
             {firstResult || "First result will appear here."}
           </p>
           <div style={{ display: "grid", gap: 10 }}>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Search trace</div>
+              <pre
+                style={{
+                  margin: 0,
+                  padding: 12,
+                  borderRadius: 14,
+                  background: "#f7f4ef",
+                  border: "1px solid rgba(31, 37, 34, 0.12)",
+                  overflowX: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word"
+                }}
+              >
+                {searchTraceLog.length > 0 ? searchTraceLog.join("\n") : "No search trace yet."}
+              </pre>
+            </div>
             <div>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Callback `error`</div>
               <pre

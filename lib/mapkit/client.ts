@@ -35,6 +35,23 @@ type MapKitPlace = {
   coordinate?: MapKitCoordinate;
 };
 
+type MapKitSearchOptions = {
+  includeAddresses?: boolean;
+  includePointsOfInterest?: boolean;
+  includePhysicalFeatures?: boolean;
+  signal?: AbortSignal;
+  region?: MapKitCoordinateRegion;
+  limitToCountries?: string | string[];
+};
+
+type SearchBias = {
+  centerLat: number;
+  centerLng: number;
+  latSpan: number;
+  lngSpan: number;
+  countryCode?: string;
+};
+
 declare global {
   interface Window {
     mapkit?: {
@@ -71,28 +88,30 @@ declare global {
       Search?: new (options?: { language?: string }) => {
         autocomplete: (
           query: string,
-          options?: {
-            includeAddresses?: boolean;
-            includePointsOfInterest?: boolean;
-            includePhysicalFeatures?: boolean;
-            signal?: AbortSignal;
-          }
+          options?: MapKitSearchOptions
         ) => Promise<{ results?: MapKitAutocompleteResult[] }>;
-        search: (
-          query: string | MapKitAutocompleteResult,
-          options?: {
-            includeAddresses?: boolean;
-            includePointsOfInterest?: boolean;
-            includePhysicalFeatures?: boolean;
-            signal?: AbortSignal;
-          }
-        ) => Promise<{ places?: MapKitPlace[] }>;
+        search: {
+          (
+            query: string | MapKitAutocompleteResult,
+            callback: (
+              error: Error | null,
+              data: { places?: MapKitPlace[] } | null
+            ) => void,
+            options?: MapKitSearchOptions
+          ): Promise<{ places?: MapKitPlace[] }>;
+          (
+            query: string | MapKitAutocompleteResult,
+            options?: MapKitSearchOptions
+          ): Promise<{ places?: MapKitPlace[] }>;
+        };
       };
     };
   }
 }
 
 let bootPromise: Promise<void> | null = null;
+const MAPKIT_SCRIPT_SRC = "https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js";
+const MAPKIT_SCRIPT_SELECTOR = 'script[data-mapkit-script="true"]';
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -149,39 +168,59 @@ export async function loadMapKit() {
   if (window.mapkit) return;
   if (!bootPromise) {
     bootPromise = new Promise<void>((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js";
-      script.async = true;
-      script.onload = async () => {
+      async function boot() {
         try {
-          const response = await fetch("/api/mapkit/token");
+          await new Promise<void>((resolveScript, rejectScript) => {
+            if (window.mapkit) {
+              resolveScript();
+              return;
+            }
+
+            const existing = document.querySelector<HTMLScriptElement>(MAPKIT_SCRIPT_SELECTOR);
+            if (existing) {
+              existing.addEventListener("load", () => resolveScript(), { once: true });
+              existing.addEventListener(
+                "error",
+                () => rejectScript(new Error("Existing MapKit script failed to load.")),
+                { once: true }
+              );
+              return;
+            }
+
+            const script = document.createElement("script");
+            script.src = MAPKIT_SCRIPT_SRC;
+            script.async = true;
+            script.dataset.mapkitScript = "true";
+            script.onload = () => resolveScript();
+            script.onerror = () => rejectScript(new Error("MapKit script failed to load from Apple CDN."));
+            document.head.appendChild(script);
+          });
+
+          const response = await fetch("/api/mapkit/token", { cache: "no-store" });
           const tokenResponse = (await response.json()) as MapKitTokenResponse;
-          if (!tokenResponse.ok || !window.mapkit) {
-            bootPromise = null;
-            reject(
-              new Error(
-                !tokenResponse.ok
-                  ? formatMapKitTokenFailure(tokenResponse)
-                  : "MapKit script loaded but window.mapkit was unavailable."
-              )
+          if (!response.ok || !tokenResponse.ok || !tokenResponse.token || !window.mapkit) {
+            throw new Error(
+              !tokenResponse.ok
+                ? formatMapKitTokenFailure(tokenResponse)
+                : !window.mapkit
+                  ? "MapKit script loaded but window.mapkit was unavailable."
+                  : `MapKit token request failed with status ${response.status}.`
             );
-            return;
           }
+
           window.mapkit.init({
             language: "en",
             authorizationCallback: (done) => done(tokenResponse.token)
           });
+
           resolve();
         } catch (error) {
           bootPromise = null;
           reject(error);
         }
-      };
-      script.onerror = () => {
-        bootPromise = null;
-        reject(new Error("MapKit script failed to load from Apple CDN."));
-      };
-      document.head.appendChild(script);
+      }
+
+      void boot();
     });
   }
   return bootPromise;
@@ -223,6 +262,23 @@ function createSearch() {
   return new window.mapkit.Search({ language: "en" });
 }
 
+function createBiasRegion(bias?: SearchBias) {
+  if (!bias || !window.mapkit) return undefined;
+
+  return createMapKitRegion(bias.centerLat, bias.centerLng, bias.latSpan, bias.lngSpan) ?? undefined;
+}
+
+function createSearchOptions(signal?: AbortSignal, bias?: SearchBias): MapKitSearchOptions {
+  return {
+    includeAddresses: true,
+    includePointsOfInterest: false,
+    includePhysicalFeatures: false,
+    signal,
+    region: createBiasRegion(bias),
+    ...(bias?.countryCode ? { limitToCountries: [bias.countryCode] } : {})
+  };
+}
+
 function toAddressSuggestion(
   result: MapKitAutocompleteResult | MapKitPlace,
   id: string
@@ -241,25 +297,21 @@ function toAddressSuggestion(
   };
 }
 
-export async function searchAddressSuggestions(query: string, signal?: AbortSignal) {
+export async function searchAddressSuggestions(query: string, signal?: AbortSignal, bias?: SearchBias) {
   if (!query.trim()) return [];
   await loadMapKit();
   const search = createSearch();
   if (!search) return [];
 
-  const response = await search.autocomplete(query, {
-    includeAddresses: true,
-    includePointsOfInterest: false,
-    includePhysicalFeatures: false,
-    signal
-  });
+  const response = await search.autocomplete(query, createSearchOptions(signal, bias));
 
   return (response.results ?? []).map((result, index) => toAddressSuggestion(result, `${query}-${index}`));
 }
 
 export async function searchBestAddressMatch(
   query: string | AddressSuggestion,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  bias?: SearchBias
 ): Promise<AddressSuggestion | null> {
   const normalizedQuery = typeof query === "string" ? query.trim() : [query.title, query.subtitle].filter(Boolean).join(" ").trim();
   if (!normalizedQuery) return null;
@@ -268,15 +320,19 @@ export async function searchBestAddressMatch(
   const search = createSearch();
   if (!search) return null;
 
-  const response = await search.search(
-    typeof query === "string" ? normalizedQuery : (query.mapkitResult as MapKitAutocompleteResult | undefined) ?? normalizedQuery,
-    {
-      includeAddresses: true,
-      includePointsOfInterest: false,
-      includePhysicalFeatures: false,
-      signal
-    }
-  );
+  const response = await new Promise<{ places?: MapKitPlace[] }>((resolve, reject) => {
+    void search.search(
+      typeof query === "string" ? normalizedQuery : (query.mapkitResult as MapKitAutocompleteResult | undefined) ?? normalizedQuery,
+      (error, data) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(data ?? {});
+      },
+      createSearchOptions(signal, bias)
+    );
+  });
 
   const bestPlace = response.places?.[0];
   return bestPlace ? toAddressSuggestion(bestPlace, `place-${normalizedQuery}`) : null;

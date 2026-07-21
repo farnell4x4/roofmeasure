@@ -12,13 +12,16 @@ import {
 import { AddressSuggestion } from "@/types/mapkit";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { MapCameraState } from "@/types/models";
 
 export function AddressSearch({
   open,
+  camera,
   onSelect,
   onClose
 }: {
   open: boolean;
+  camera: MapCameraState;
   onSelect: (suggestion: AddressSuggestion) => void;
   onClose: () => void;
 }) {
@@ -36,7 +39,12 @@ export function AddressSearch({
 
     const controller = new AbortController();
     setState("loading");
-    searchAddressSuggestions(debounced, controller.signal)
+    searchAddressSuggestions(debounced, controller.signal, {
+      centerLat: camera.centerLat,
+      centerLng: camera.centerLng,
+      latSpan: camera.latSpan,
+      lngSpan: camera.lngSpan
+    })
       .then((items) => {
         setResults(items);
         setState("idle");
@@ -50,7 +58,7 @@ export function AddressSearch({
       });
 
     return () => controller.abort();
-  }, [debounced, open]);
+  }, [camera.centerLat, camera.centerLng, camera.latSpan, camera.lngSpan, debounced, open]);
 
   async function handleSubmit() {
     const normalizedQuery = query.trim();
@@ -58,7 +66,12 @@ export function AddressSearch({
 
     setState("loading");
     try {
-      const bestMatch = await searchBestAddressMatch(normalizedQuery);
+      const bestMatch = await searchBestAddressMatch(normalizedQuery, undefined, {
+        centerLat: camera.centerLat,
+        centerLng: camera.centerLng,
+        latSpan: camera.latSpan,
+        lngSpan: camera.lngSpan
+      });
       if (!bestMatch) {
         setResults([]);
         setState("idle");
@@ -76,7 +89,12 @@ export function AddressSearch({
   async function handleSuggestionSelect(result: AddressSuggestion) {
     setState("loading");
     try {
-      const bestMatch = await searchBestAddressMatch(result);
+      const bestMatch = await searchBestAddressMatch(result, undefined, {
+        centerLat: camera.centerLat,
+        centerLng: camera.centerLng,
+        latSpan: camera.latSpan,
+        lngSpan: camera.lngSpan
+      });
       onSelect(bestMatch ?? result);
       setErrorMessage("MapKit search is unavailable.");
       setState("idle");

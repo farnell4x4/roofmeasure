@@ -48,10 +48,11 @@ Use `Cmd+Shift+P` in VS Code, run `Tasks: Run Task`, then choose `RoofMeasure: R
 That task:
 
 - stops the existing local dev server if one is running
-- starts `npm run dev` again in a real Terminal session so the process stays alive
-- waits for `http://127.0.0.1:3000`
+- starts `npm run dev` again inside the VS Code task terminal
+- waits for `http://localhost:3000`
 - activates Safari
-- reloads an existing tab already on that URL or on `http://localhost:3000`, or opens a new tab if none exists
+- reloads an existing local dev tab, or opens a new tab if none exists
+- sends Safari to `http://localhost:3000/mapkit-test`
 
 The script lives at [scripts/restart-dev-and-refresh-safari.sh](/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/scripts/restart-dev-and-refresh-safari.sh), and the VS Code task is in [.vscode/tasks.json](/Users/m4home/Desktop/VSCode/VSWebsites/RoofMeasure/.vscode/tasks.json).
 

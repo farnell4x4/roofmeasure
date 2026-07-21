@@ -4038,7 +4038,7 @@
       "format": "cjs"
     },
     ".open-next/server-functions/default/.next/server/app/projects/[projectId]/page.js": {
-      "bytes": 42726,
+      "bytes": 43337,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -4155,7 +4155,7 @@
       "format": "cjs"
     },
     ".open-next/server-functions/default/.next/server/app/mapkit-test/page.js": {
-      "bytes": 25893,
+      "bytes": 26638,
       "imports": [
         {
           "path": ".open-next/server-functions/default/node_modules/next/dist/shared/lib/router/utils/app-paths.js",
@@ -7178,13 +7178,13 @@
           "bytesInOutput": 7083
         },
         ".open-next/server-functions/default/.next/server/app/projects/[projectId]/page.js": {
-          "bytesInOutput": 43804
+          "bytesInOutput": 44456
         },
         ".open-next/server-functions/default/.next/server/app/api/mapkit/token/route.js": {
           "bytesInOutput": 11639
         },
         ".open-next/server-functions/default/.next/server/app/mapkit-test/page.js": {
-          "bytesInOutput": 26260
+          "bytesInOutput": 27021
         },
         ".open-next/server-functions/default/.next/server/app/_not-found/page.js": {
           "bytesInOutput": 18751
@@ -7361,7 +7361,7 @@
           "bytesInOutput": 59535
         }
       },
-      "bytes": 2896631
+      "bytes": 2898044
     }
   }
 }

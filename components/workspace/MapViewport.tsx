@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createMapKitRegion, getMapKitConfigurationErrorMessage, loadMapKit } from "@/lib/mapkit/client";
+import {
+  createMapKitRegion,
+  getMapKitConfigurationErrorMessage,
+  getMapKitRuntimeErrorMessage,
+  loadMapKit
+} from "@/lib/mapkit/client";
 import { formatLength } from "@/lib/units";
 import { MapCameraState, MeasurementSegment, MeasurementType, Project, UnitSystem } from "@/types/models";
 import { MEASUREMENT_TYPES } from "@/lib/constants";
@@ -133,9 +138,9 @@ export function MapViewport({
           map.destroy();
           mapInstanceRef.current = null;
         };
-      } catch {
+      } catch (error) {
         if (cancelled) return;
-        setMapError(await getMapKitConfigurationErrorMessage());
+        setMapError(getMapKitRuntimeErrorMessage(error) || (await getMapKitConfigurationErrorMessage()));
       }
     }
 
