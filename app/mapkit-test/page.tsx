@@ -9,8 +9,25 @@ import {
   searchBestAddressMatch
 } from "@/lib/mapkit/client";
 import { AddressSuggestion } from "@/types/mapkit";
+import { MeasureContinuationMode } from "@/types/models";
 
 type LocationPermission = PermissionState | "unsupported";
+const LOCATION_ALERT_DISMISSED_KEY = "roofmeasure.mapkit-test.location-alert-dismissed";
+type MeasurementPoint = { latitude: number; longitude: number };
+type MeasurementSegment = { id: string; start: MeasurementPoint; end: MeasurementPoint };
+type ProjectedMeasurementSegment = {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+};
+type ProjectedMeasurementPoint = {
+  id: string;
+  x: number;
+  y: number;
+  kind: "start" | "end" | "pending";
+};
 
 async function getLocationPermission(): Promise<LocationPermission> {
   if (typeof navigator === "undefined" || !navigator.permissions || typeof navigator.permissions.query !== "function") {
@@ -64,10 +81,18 @@ export default function MapKitTestPage() {
   } | null>(null);
   const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [measurementMode, setMeasurementMode] = useState<MeasureContinuationMode | null>(null);
+  const [measurementSegments, setMeasurementSegments] = useState<MeasurementSegment[]>([]);
+  const [pendingLineStart, setPendingLineStart] = useState<MeasurementPoint | null>(null);
+  const [pendingModeDecisionPoint, setPendingModeDecisionPoint] = useState<MeasurementPoint | null>(null);
+  const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] = useState(false);
+  const [projectedMeasurementSegments, setProjectedMeasurementSegments] = useState<ProjectedMeasurementSegment[]>([]);
+  const [projectedMeasurementPoints, setProjectedMeasurementPoints] = useState<ProjectedMeasurementPoint[]>([]);
   const [locationState, setLocationState] = useState<
     "idle" | "requesting" | "granted" | "denied" | "unsupported" | "error" | "prompt"
   >("idle");
   const [locationAlert, setLocationAlert] = useState("");
+  const [isLocationAlertDismissed, setIsLocationAlertDismissed] = useState(false);
 
   const safariLocationHelp =
     'In Safari, open Website Settings for this page and change Location to "Allow", then reload this page.';
@@ -75,6 +100,70 @@ export default function MapKitTestPage() {
   useEffect(() => {
     locationBiasRef.current = locationBias;
   }, [locationBias]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setIsLocationAlertDismissed(window.localStorage.getItem(LOCATION_ALERT_DISMISSED_KEY) === "1");
+  }, []);
+
+  function dismissLocationAlert() {
+    setIsLocationAlertDismissed(true);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(LOCATION_ALERT_DISMISSED_KEY, "1");
+    }
+  }
+
+  function restoreLocationAlert() {
+    setIsLocationAlertDismissed(false);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(LOCATION_ALERT_DISMISSED_KEY);
+    }
+  }
+
+  function resetMeasurementSession() {
+    setMeasurementMode(null);
+    setMeasurementSegments([]);
+    setPendingLineStart(null);
+    setPendingModeDecisionPoint(null);
+    setIsMeasurementSettingsOpen(false);
+    setProjectedMeasurementSegments([]);
+    setProjectedMeasurementPoints([]);
+  }
+
+  function getLastMeasuredEndpoint() {
+    const lastSegment = measurementSegments[measurementSegments.length - 1];
+    return lastSegment?.end ?? null;
+  }
+
+  function appendMeasurementSegment(start: MeasurementPoint, end: MeasurementPoint) {
+    setMeasurementSegments((currentSegments) => [
+      ...currentSegments,
+      {
+        id: `${Date.now()}-${currentSegments.length}`,
+        start,
+        end
+      }
+    ]);
+  }
+
+  function applyMeasurementModeChoice(mode: MeasureContinuationMode) {
+    const decisionPoint = pendingModeDecisionPoint;
+    const lastEndpoint = getLastMeasuredEndpoint();
+
+    setMeasurementMode(mode);
+    setPendingModeDecisionPoint(null);
+    setIsMeasurementSettingsOpen(false);
+
+    if (!decisionPoint) return;
+
+    if (mode === "continuous" && lastEndpoint) {
+      appendMeasurementSegment(lastEndpoint, decisionPoint);
+      setPendingLineStart(decisionPoint);
+      return;
+    }
+
+    setPendingLineStart(decisionPoint);
+  }
 
   function removeAnnotation(annotationRef: React.MutableRefObject<unknown>) {
     const map = mapInstanceRef.current;
@@ -151,8 +240,9 @@ export default function MapKitTestPage() {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude
       });
+      restoreLocationAlert();
       setLocationState("granted");
-      setLocationAlert("Using your current location to improve nearby address suggestions.");
+      setLocationAlert("");
     } catch (error) {
       const geolocationError =
         error && typeof error === "object" && "code" in error ? (error as GeolocationPositionError) : null;
@@ -242,11 +332,12 @@ export default function MapKitTestPage() {
 
       if (permission === "granted") {
         setLocationState("granted");
+        restoreLocationAlert();
         if (!locationBiasRef.current) {
-          setLocationAlert("Location access is allowed. Fetching your current location for nearby suggestions.");
+          setLocationAlert("");
           void loadCurrentLocation();
         } else {
-          setLocationAlert("Using your current location to improve nearby address suggestions.");
+          setLocationAlert("");
         }
         return;
       }
@@ -275,6 +366,7 @@ export default function MapKitTestPage() {
         permissionStatus.onchange = () => {
           setLocationState(permissionStatus!.state);
           if (permissionStatus!.state === "granted") {
+            setLocationAlert("");
             void loadCurrentLocation();
             return;
           }
@@ -396,6 +488,161 @@ export default function MapKitTestPage() {
     syncSelectedPlaceAnnotation(selectedPlace);
   }, [currentLocation, mapReady, selectedPlace]);
 
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !mapInstanceRef.current) return;
+
+    function handleMapClick(event: MouseEvent) {
+      if (pendingModeDecisionPoint) return;
+
+      const map = mapInstanceRef.current;
+      if (!map) return;
+
+      const coordinate = map.convertPointOnPageToCoordinate(new DOMPoint(event.pageX, event.pageY));
+      const tappedPoint = {
+        latitude: coordinate.latitude ?? 0,
+        longitude: coordinate.longitude ?? 0
+      };
+
+      if (!measurementSegments.length) {
+        if (!pendingLineStart) {
+          setPendingLineStart(tappedPoint);
+          return;
+        }
+
+        appendMeasurementSegment(pendingLineStart, tappedPoint);
+        if (measurementMode === "continuous") {
+          setPendingLineStart(tappedPoint);
+        } else {
+          setPendingLineStart(null);
+        }
+        return;
+      }
+
+      if (measurementMode === null) {
+        setPendingModeDecisionPoint(tappedPoint);
+        return;
+      }
+
+      if (measurementMode === "continuous") {
+        const startPoint = pendingLineStart ?? getLastMeasuredEndpoint();
+        if (!startPoint) {
+          setPendingLineStart(tappedPoint);
+          return;
+        }
+
+        appendMeasurementSegment(startPoint, tappedPoint);
+        setPendingLineStart(tappedPoint);
+        return;
+      }
+
+      if (!pendingLineStart) {
+        setPendingLineStart(tappedPoint);
+        return;
+      }
+
+      appendMeasurementSegment(pendingLineStart, tappedPoint);
+      setPendingLineStart(null);
+    }
+
+    const mapElement = mapRef.current;
+    mapElement.addEventListener("click", handleMapClick);
+
+    return () => {
+      mapElement.removeEventListener("click", handleMapClick);
+    };
+  }, [mapReady, measurementMode, measurementSegments, pendingLineStart, pendingModeDecisionPoint]);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !mapInstanceRef.current) {
+      setProjectedMeasurementSegments([]);
+      setProjectedMeasurementPoints([]);
+      return;
+    }
+
+    const map = mapInstanceRef.current;
+    const mapElement = mapRef.current;
+
+    function projectMeasurements() {
+      const activeMap = mapInstanceRef.current;
+      const activeElement = mapRef.current;
+      if (!activeMap || !activeElement) return;
+
+      const bounds = activeElement.getBoundingClientRect();
+      setProjectedMeasurementSegments(
+        measurementSegments.map((segment) => {
+          const start = activeMap.convertCoordinateToPointOnPage({
+            latitude: segment.start.latitude,
+            longitude: segment.start.longitude
+          });
+          const end = activeMap.convertCoordinateToPointOnPage({
+            latitude: segment.end.latitude,
+            longitude: segment.end.longitude
+          });
+
+          return {
+            id: segment.id,
+            x1: start.x - bounds.left,
+            y1: start.y - bounds.top,
+            x2: end.x - bounds.left,
+            y2: end.y - bounds.top
+          };
+        })
+      );
+
+      const points: ProjectedMeasurementPoint[] = [];
+      measurementSegments.forEach((segment, index) => {
+        const start = activeMap.convertCoordinateToPointOnPage({
+          latitude: segment.start.latitude,
+          longitude: segment.start.longitude
+        });
+        const end = activeMap.convertCoordinateToPointOnPage({
+          latitude: segment.end.latitude,
+          longitude: segment.end.longitude
+        });
+
+        if (index === 0) {
+          points.push({
+            id: `${segment.id}-start`,
+            x: start.x - bounds.left,
+            y: start.y - bounds.top,
+            kind: "start"
+          });
+        }
+
+        points.push({
+          id: `${segment.id}-end`,
+          x: end.x - bounds.left,
+          y: end.y - bounds.top,
+          kind: "end"
+        });
+      });
+
+      if (pendingLineStart) {
+        const pending = activeMap.convertCoordinateToPointOnPage({
+          latitude: pendingLineStart.latitude,
+          longitude: pendingLineStart.longitude
+        });
+        points.push({
+          id: "pending-line-start",
+          x: pending.x - bounds.left,
+          y: pending.y - bounds.top,
+          kind: "pending"
+        });
+      }
+
+      setProjectedMeasurementPoints(points);
+    }
+
+    projectMeasurements();
+    map.addEventListener("region-change-end", projectMeasurements);
+    window.addEventListener("resize", projectMeasurements);
+
+    return () => {
+      map.removeEventListener("region-change-end", projectMeasurements);
+      window.removeEventListener("resize", projectMeasurements);
+    };
+  }, [mapReady, measurementSegments, pendingLineStart]);
+
   async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -434,6 +681,7 @@ export default function MapKitTestPage() {
         latitude: bestMatch.latitude,
         longitude: bestMatch.longitude
       });
+      resetMeasurementSession();
       setSuggestions([]);
       setAutocompleteState("idle");
       setAutocompleteMessage("");
@@ -458,6 +706,7 @@ export default function MapKitTestPage() {
           latitude: suggestion.latitude,
           longitude: suggestion.longitude
         });
+        resetMeasurementSession();
         setSuggestions([]);
         setAutocompleteState("idle");
         setAutocompleteMessage("");
@@ -490,6 +739,7 @@ export default function MapKitTestPage() {
         latitude: bestMatch.latitude,
         longitude: bestMatch.longitude
       });
+      resetMeasurementSession();
       setSuggestions([]);
       setAutocompleteState("idle");
       setAutocompleteMessage("");
@@ -522,7 +772,7 @@ export default function MapKitTestPage() {
           gap: 8
         }}
       >
-        {locationAlert ? (
+        {locationAlert && !isLocationAlertDismissed ? (
           <div
             role="alert"
             style={{
@@ -536,9 +786,27 @@ export default function MapKitTestPage() {
               boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)"
             }}
           >
-            <div style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 600 }}>
-              <MapPin size={16} />
-              Location access
+            <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 600 }}>
+                <MapPin size={16} />
+                Location access
+              </div>
+              <button
+                type="button"
+                aria-label="Dismiss location access message"
+                onClick={dismissLocationAlert}
+                style={{
+                  border: 0,
+                  background: "transparent",
+                  color: "#8a6030",
+                  cursor: "pointer",
+                  fontSize: 18,
+                  lineHeight: 1,
+                  padding: 0
+                }}
+              >
+                ×
+              </button>
             </div>
             <div style={{ fontSize: 14 }}>{locationAlert}</div>
             {locationState === "prompt" || locationState === "error" || locationState === "idle" ? (
@@ -692,12 +960,173 @@ export default function MapKitTestPage() {
         ) : null}
       </form>
       <div
+        style={{
+          position: "absolute",
+          top: 16,
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 2,
+          display: "grid",
+          justifyItems: "center",
+          gap: 8
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setIsMeasurementSettingsOpen((current) => !current)}
+          style={{
+            border: "1px solid rgba(31, 37, 34, 0.12)",
+            background: "rgba(255, 255, 255, 0.94)",
+            color: "#1f2522",
+            borderRadius: 999,
+            padding: "10px 14px",
+            fontSize: 13,
+            fontWeight: 600,
+            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
+            cursor: "pointer"
+          }}
+        >
+          Settings
+        </button>
+        {isMeasurementSettingsOpen ? (
+          <div
+            style={{
+              display: "grid",
+              gap: 8,
+              padding: 10,
+              borderRadius: 16,
+              background: "rgba(255, 255, 255, 0.96)",
+              border: "1px solid rgba(31, 37, 34, 0.12)",
+              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setMeasurementMode("continuous");
+                setPendingLineStart((current) => current ?? getLastMeasuredEndpoint());
+                setPendingModeDecisionPoint(null);
+                setIsMeasurementSettingsOpen(false);
+              }}
+              style={{
+                border: 0,
+                borderRadius: 12,
+                padding: "10px 12px",
+                background: measurementMode === "continuous" ? "#1f2522" : "rgba(31, 37, 34, 0.08)",
+                color: measurementMode === "continuous" ? "#fff" : "#1f2522",
+                cursor: "pointer"
+              }}
+            >
+              Continuous
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMeasurementMode("new-line");
+                setPendingLineStart(null);
+                setPendingModeDecisionPoint(null);
+                setIsMeasurementSettingsOpen(false);
+              }}
+              style={{
+                border: 0,
+                borderRadius: 12,
+                padding: "10px 12px",
+                background: measurementMode === "new-line" ? "#1f2522" : "rgba(31, 37, 34, 0.08)",
+                color: measurementMode === "new-line" ? "#fff" : "#1f2522",
+                cursor: "pointer"
+              }}
+            >
+              New Line
+            </button>
+          </div>
+        ) : null}
+        {pendingModeDecisionPoint ? (
+          <div
+            style={{
+              display: "grid",
+              gap: 8,
+              width: "min(320px, calc(100vw - 32px))",
+              padding: 12,
+              borderRadius: 16,
+              background: "rgba(255, 255, 255, 0.97)",
+              border: "1px solid rgba(31, 37, 34, 0.12)",
+              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#1f2522" }}>
+              Continue from previous or start a new line?
+            </div>
+            <button
+              type="button"
+              onClick={() => applyMeasurementModeChoice("continuous")}
+              style={{
+                border: 0,
+                borderRadius: 12,
+                padding: "10px 12px",
+                background: "#1f2522",
+                color: "#fff",
+                cursor: "pointer"
+              }}
+            >
+              Continue
+            </button>
+            <button
+              type="button"
+              onClick={() => applyMeasurementModeChoice("new-line")}
+              style={{
+                border: 0,
+                borderRadius: 12,
+                padding: "10px 12px",
+                background: "rgba(31, 37, 34, 0.08)",
+                color: "#1f2522",
+                cursor: "pointer"
+              }}
+            >
+              Start New
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <div
         ref={mapRef}
         style={{
           position: "absolute",
           inset: 0
         }}
       />
+      <svg
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 1,
+          pointerEvents: "none"
+        }}
+      >
+        {projectedMeasurementSegments.map((segment) => (
+          <line
+            key={segment.id}
+            x1={segment.x1}
+            y1={segment.y1}
+            x2={segment.x2}
+            y2={segment.y2}
+            stroke="#1f2522"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
+        ))}
+        {projectedMeasurementPoints.map((point) => (
+          <circle
+            key={point.id}
+            cx={point.x}
+            cy={point.y}
+            r={point.kind === "pending" ? 7 : 6}
+            fill={point.kind === "pending" ? "#ffffff" : "#1f2522"}
+            stroke="#ffffff"
+            strokeWidth={point.kind === "pending" ? 3 : 2}
+          />
+        ))}
+      </svg>
     </main>
   );
 }
