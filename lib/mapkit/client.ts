@@ -21,6 +21,10 @@ type MapKitPoint = {
   x: number;
   y: number;
 };
+type MapKitSize = {
+  width: number;
+  height: number;
+};
 
 type MapKitAutocompleteResult = {
   displayLines?: string[];
@@ -121,8 +125,8 @@ declare global {
         options?: {
           title?: string;
           subtitle?: string;
-          anchorOffset?: MapKitPoint;
-          size?: { width: number; height: number };
+          anchorOffset?: DOMPoint;
+          size?: MapKitSize;
           data?: unknown;
         }
       ) => {
@@ -131,6 +135,18 @@ declare global {
         title?: string;
         subtitle?: string;
       };
+      PolylineOverlay?: new (
+        points: MapKitCoordinate[],
+        options?: {
+          style?: unknown;
+        }
+      ) => unknown;
+      Style?: new (options?: {
+        strokeColor?: string;
+        lineWidth?: number;
+        lineCap?: "butt" | "round" | "square";
+        lineJoin?: "miter" | "round" | "bevel";
+      }) => unknown;
       MapType: {
         Satellite: "satellite";
         Hybrid: "hybrid";
@@ -152,6 +168,8 @@ declare global {
         mapType: "satellite" | "hybrid" | "mutedStandard" | "standard";
         addAnnotation: (annotation: unknown) => unknown;
         removeAnnotation: (annotation: unknown) => void;
+        addOverlay: (overlay: unknown) => unknown;
+        removeOverlay: (overlay: unknown) => void;
         addEventListener: (type: string, listener: (event: Record<string, unknown>) => void) => void;
         removeEventListener: (type: string, listener: (event: Record<string, unknown>) => void) => void;
         convertPointOnPageToCoordinate: (point: DOMPoint) => MapKitCoordinate;

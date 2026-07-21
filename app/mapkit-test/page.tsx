@@ -8,6 +8,7 @@ import {
   searchAddressSuggestions,
   searchBestAddressMatch
 } from "@/lib/mapkit/client";
+import { haversineDistanceFeet } from "@/lib/measurement/geometry";
 import { AddressSuggestion } from "@/types/mapkit";
 import { MeasureContinuationMode } from "@/types/models";
 
@@ -15,19 +16,6 @@ type LocationPermission = PermissionState | "unsupported";
 const LOCATION_ALERT_DISMISSED_KEY = "roofmeasure.mapkit-test.location-alert-dismissed";
 type MeasurementPoint = { latitude: number; longitude: number };
 type MeasurementSegment = { id: string; start: MeasurementPoint; end: MeasurementPoint };
-type ProjectedMeasurementSegment = {
-  id: string;
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-};
-type ProjectedMeasurementPoint = {
-  id: string;
-  x: number;
-  y: number;
-  kind: "start" | "end" | "pending";
-};
 
 async function getLocationPermission(): Promise<LocationPermission> {
   if (typeof navigator === "undefined" || !navigator.permissions || typeof navigator.permissions.query !== "function") {
@@ -58,6 +46,9 @@ export default function MapKitTestPage() {
   const hasCenteredOnUserLocationRef = useRef(false);
   const selectedPlaceAnnotationRef = useRef<unknown>(null);
   const currentLocationAnnotationRef = useRef<unknown>(null);
+  const measurementPointAnnotationRefs = useRef<unknown[]>([]);
+  const measurementLineOverlayRefs = useRef<unknown[]>([]);
+  const measurementLabelAnnotationRefs = useRef<unknown[]>([]);
   const locationBiasRef = useRef<{
     centerLat: number;
     centerLng: number;
@@ -67,6 +58,7 @@ export default function MapKitTestPage() {
   } | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [query, setQuery] = useState("");
+  const [suppressSuggestionsUntilTyping, setSuppressSuggestionsUntilTyping] = useState(false);
   const [searchState, setSearchState] = useState<"idle" | "loading" | "error">("idle");
   const [searchMessage, setSearchMessage] = useState("");
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
@@ -86,8 +78,6 @@ export default function MapKitTestPage() {
   const [pendingLineStart, setPendingLineStart] = useState<MeasurementPoint | null>(null);
   const [pendingModeDecisionPoint, setPendingModeDecisionPoint] = useState<MeasurementPoint | null>(null);
   const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] = useState(false);
-  const [projectedMeasurementSegments, setProjectedMeasurementSegments] = useState<ProjectedMeasurementSegment[]>([]);
-  const [projectedMeasurementPoints, setProjectedMeasurementPoints] = useState<ProjectedMeasurementPoint[]>([]);
   const [locationState, setLocationState] = useState<
     "idle" | "requesting" | "granted" | "denied" | "unsupported" | "error" | "prompt"
   >("idle");
@@ -126,8 +116,6 @@ export default function MapKitTestPage() {
     setPendingLineStart(null);
     setPendingModeDecisionPoint(null);
     setIsMeasurementSettingsOpen(false);
-    setProjectedMeasurementSegments([]);
-    setProjectedMeasurementPoints([]);
   }
 
   function getLastMeasuredEndpoint() {
@@ -170,6 +158,147 @@ export default function MapKitTestPage() {
     if (!map || !annotationRef.current) return;
     map.removeAnnotation(annotationRef.current);
     annotationRef.current = null;
+  }
+
+  function clearMeasurementVisuals() {
+    const map = mapInstanceRef.current;
+    if (!map) {
+      measurementPointAnnotationRefs.current = [];
+      measurementLineOverlayRefs.current = [];
+      measurementLabelAnnotationRefs.current = [];
+      return;
+    }
+
+    measurementPointAnnotationRefs.current.forEach((annotation) => map.removeAnnotation(annotation));
+    measurementLabelAnnotationRefs.current.forEach((annotation) => map.removeAnnotation(annotation));
+    measurementLineOverlayRefs.current.forEach((overlay) => map.removeOverlay(overlay));
+    measurementPointAnnotationRefs.current = [];
+    measurementLineOverlayRefs.current = [];
+    measurementLabelAnnotationRefs.current = [];
+  }
+
+  function syncMeasurementVisuals() {
+    const mapkit = window.mapkit;
+    const map = mapInstanceRef.current;
+    if (!mapkit || !map) return;
+
+    clearMeasurementVisuals();
+
+    const pointAnnotations: unknown[] = [];
+    const lineOverlays: unknown[] = [];
+    const labelAnnotations: unknown[] = [];
+    const renderedPointKeys = new Set<string>();
+    const coordinateCtor = mapkit.Coordinate;
+    const annotationCtor = mapkit.Annotation;
+    const polylineCtor = mapkit.PolylineOverlay;
+    const styleCtor = mapkit.Style;
+    const activeMap = map;
+
+    function addPointMarker(point: MeasurementPoint, tone: "solid" | "pending") {
+      if (!annotationCtor) return;
+
+      const key = `${point.latitude.toFixed(7)}:${point.longitude.toFixed(7)}:${tone}`;
+      if (renderedPointKeys.has(key)) return;
+      renderedPointKeys.add(key);
+
+      const annotation = new annotationCtor(
+        new coordinateCtor(point.latitude, point.longitude),
+        () => {
+          const element = document.createElement("div");
+          element.style.width = tone === "pending" ? "16px" : "14px";
+          element.style.height = tone === "pending" ? "16px" : "14px";
+          element.style.borderRadius = "999px";
+          element.style.background = tone === "pending" ? "#ffffff" : "#1f2522";
+          element.style.border = tone === "pending" ? "3px solid #1f2522" : "3px solid rgba(255,255,255,0.95)";
+          element.style.boxShadow = "0 6px 18px rgba(20, 24, 22, 0.22)";
+          return element;
+        },
+        {
+          size: {
+            width: tone === "pending" ? 16 : 14,
+            height: tone === "pending" ? 16 : 14
+          }
+        }
+      );
+
+      activeMap.addAnnotation(annotation);
+      pointAnnotations.push(annotation);
+    }
+
+    measurementSegments.forEach((segment) => {
+      addPointMarker(segment.start, "solid");
+      addPointMarker(segment.end, "solid");
+
+      if (polylineCtor) {
+        const overlay = new polylineCtor(
+          [
+            new coordinateCtor(segment.start.latitude, segment.start.longitude),
+            new coordinateCtor(segment.end.latitude, segment.end.longitude)
+          ],
+          {
+            style: styleCtor
+              ? new styleCtor({
+                  strokeColor: "#1f2522",
+                  lineWidth: 4,
+                  lineCap: "round",
+                  lineJoin: "round"
+                })
+              : undefined
+          }
+        );
+        activeMap.addOverlay(overlay);
+        lineOverlays.push(overlay);
+      }
+
+      if (annotationCtor) {
+        const midpoint = {
+          latitude: (segment.start.latitude + segment.end.latitude) / 2,
+          longitude: (segment.start.longitude + segment.end.longitude) / 2
+        };
+        const segmentVector = {
+          x: segment.end.longitude - segment.start.longitude,
+          y: segment.end.latitude - segment.start.latitude
+        };
+        const segmentLength = Math.hypot(segmentVector.x, segmentVector.y) || 1;
+        const sideOffset = {
+          x: (-segmentVector.y / segmentLength) * 34,
+          y: (segmentVector.x / segmentLength) * 34
+        };
+        const distanceFeet = haversineDistanceFeet(
+          { lat: segment.start.latitude, lng: segment.start.longitude },
+          { lat: segment.end.latitude, lng: segment.end.longitude }
+        );
+        const label = `${Math.round(distanceFeet)}'`;
+        const labelAnnotation = new annotationCtor(
+          new coordinateCtor(midpoint.latitude, midpoint.longitude),
+          () => {
+            const element = document.createElement("div");
+            element.textContent = label;
+            element.style.color = "#ffffff";
+            element.style.fontSize = "15px";
+            element.style.fontWeight = "700";
+            element.style.whiteSpace = "nowrap";
+            element.style.textShadow =
+              "0 1px 0 #000, 1px 0 0 #000, 0 -1px 0 #000, -1px 0 0 #000, 1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000";
+            return element;
+          },
+          {
+            anchorOffset: new DOMPoint(sideOffset.x, sideOffset.y),
+            size: { width: 56, height: 20 }
+          }
+        );
+        activeMap.addAnnotation(labelAnnotation);
+        labelAnnotations.push(labelAnnotation);
+      }
+    });
+
+    if (pendingLineStart) {
+      addPointMarker(pendingLineStart, "pending");
+    }
+
+    measurementPointAnnotationRefs.current = pointAnnotations;
+    measurementLineOverlayRefs.current = lineOverlays;
+    measurementLabelAnnotationRefs.current = labelAnnotations;
   }
 
   function syncSelectedPlaceAnnotation(place: { latitude: number; longitude: number } | null) {
@@ -310,6 +439,7 @@ export default function MapKitTestPage() {
     return () => {
       cancelled = true;
       setMapReady(false);
+      clearMeasurementVisuals();
       selectedPlaceAnnotationRef.current = null;
       currentLocationAnnotationRef.current = null;
       mapInstanceRef.current?.destroy?.();
@@ -407,7 +537,7 @@ export default function MapKitTestPage() {
   useEffect(() => {
     const normalizedQuery = query.trim();
 
-    if (normalizedQuery.length < 3) {
+    if (suppressSuggestionsUntilTyping || normalizedQuery.length < 3) {
       setSuggestions([]);
       setAutocompleteState("idle");
       setAutocompleteMessage("");
@@ -469,6 +599,19 @@ export default function MapKitTestPage() {
     map.region = region;
   }
 
+  function switchMapToSatelliteAfterSearch() {
+    window.setTimeout(() => {
+      const mapkit = window.mapkit;
+      const map = mapInstanceRef.current;
+      if (!mapkit || !map) return;
+
+      map.mapType =
+        (mapkit.Map as { MapTypes?: { Satellite?: typeof map.mapType } } | undefined)?.MapTypes?.Satellite ??
+        mapkit.MapType?.Satellite ??
+        map.mapType;
+    }, 250);
+  }
+
   useEffect(() => {
     if (!mapReady || !currentLocation || selectedPlace || hasCenteredOnUserLocationRef.current) {
       return;
@@ -491,13 +634,16 @@ export default function MapKitTestPage() {
   useEffect(() => {
     if (!mapReady || !mapRef.current || !mapInstanceRef.current) return;
 
-    function handleMapClick(event: MouseEvent) {
+    function handleMapTap(event: Record<string, unknown>) {
       if (pendingModeDecisionPoint) return;
 
       const map = mapInstanceRef.current;
       if (!map) return;
 
-      const coordinate = map.convertPointOnPageToCoordinate(new DOMPoint(event.pageX, event.pageY));
+      const pointOnPage = event.pointOnPage as DOMPoint | undefined;
+      if (!pointOnPage) return;
+
+      const coordinate = map.convertPointOnPageToCoordinate(pointOnPage);
       const tappedPoint = {
         latitude: coordinate.latitude ?? 0,
         longitude: coordinate.longitude ?? 0
@@ -544,99 +690,17 @@ export default function MapKitTestPage() {
       setPendingLineStart(null);
     }
 
-    const mapElement = mapRef.current;
-    mapElement.addEventListener("click", handleMapClick);
+    const map = mapInstanceRef.current;
+    map.addEventListener("single-tap", handleMapTap);
 
     return () => {
-      mapElement.removeEventListener("click", handleMapClick);
+      map.removeEventListener("single-tap", handleMapTap);
     };
   }, [mapReady, measurementMode, measurementSegments, pendingLineStart, pendingModeDecisionPoint]);
 
   useEffect(() => {
-    if (!mapReady || !mapRef.current || !mapInstanceRef.current) {
-      setProjectedMeasurementSegments([]);
-      setProjectedMeasurementPoints([]);
-      return;
-    }
-
-    const map = mapInstanceRef.current;
-    const mapElement = mapRef.current;
-
-    function projectMeasurements() {
-      const activeMap = mapInstanceRef.current;
-      const activeElement = mapRef.current;
-      const mapkit = window.mapkit;
-      if (!activeMap || !activeElement || !mapkit) return;
-
-      const bounds = activeElement.getBoundingClientRect();
-      setProjectedMeasurementSegments(
-        measurementSegments.map((segment) => {
-          const start = activeMap.convertCoordinateToPointOnPage(
-            new mapkit.Coordinate(segment.start.latitude, segment.start.longitude)
-          );
-          const end = activeMap.convertCoordinateToPointOnPage(
-            new mapkit.Coordinate(segment.end.latitude, segment.end.longitude)
-          );
-
-          return {
-            id: segment.id,
-            x1: start.x - bounds.left,
-            y1: start.y - bounds.top,
-            x2: end.x - bounds.left,
-            y2: end.y - bounds.top
-          };
-        })
-      );
-
-      const points: ProjectedMeasurementPoint[] = [];
-      measurementSegments.forEach((segment, index) => {
-        const start = activeMap.convertCoordinateToPointOnPage(
-          new mapkit.Coordinate(segment.start.latitude, segment.start.longitude)
-        );
-        const end = activeMap.convertCoordinateToPointOnPage(
-          new mapkit.Coordinate(segment.end.latitude, segment.end.longitude)
-        );
-
-        if (index === 0) {
-          points.push({
-            id: `${segment.id}-start`,
-            x: start.x - bounds.left,
-            y: start.y - bounds.top,
-            kind: "start"
-          });
-        }
-
-        points.push({
-          id: `${segment.id}-end`,
-          x: end.x - bounds.left,
-          y: end.y - bounds.top,
-          kind: "end"
-        });
-      });
-
-      if (pendingLineStart) {
-        const pending = activeMap.convertCoordinateToPointOnPage(
-          new mapkit.Coordinate(pendingLineStart.latitude, pendingLineStart.longitude)
-        );
-        points.push({
-          id: "pending-line-start",
-          x: pending.x - bounds.left,
-          y: pending.y - bounds.top,
-          kind: "pending"
-        });
-      }
-
-      setProjectedMeasurementPoints(points);
-    }
-
-    projectMeasurements();
-    map.addEventListener("region-change-end", projectMeasurements);
-    window.addEventListener("resize", projectMeasurements);
-
-    return () => {
-      map.removeEventListener("region-change-end", projectMeasurements);
-      window.removeEventListener("resize", projectMeasurements);
-    };
+    if (!mapReady) return;
+    syncMeasurementVisuals();
   }, [mapReady, measurementSegments, pendingLineStart]);
 
   async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
@@ -673,10 +737,12 @@ export default function MapKitTestPage() {
       }
 
       recenterMap(bestMatch.latitude, bestMatch.longitude, 0.003, 0.003);
+      switchMapToSatelliteAfterSearch();
       setSelectedPlace({
         latitude: bestMatch.latitude,
         longitude: bestMatch.longitude
       });
+      setSuppressSuggestionsUntilTyping(true);
       resetMeasurementSession();
       setSuggestions([]);
       setAutocompleteState("idle");
@@ -692,16 +758,19 @@ export default function MapKitTestPage() {
 
   async function handleSuggestionSelect(suggestion: AddressSuggestion) {
     setQuery(suggestion.formattedAddress || [suggestion.title, suggestion.subtitle].filter(Boolean).join(", "));
+    setSuppressSuggestionsUntilTyping(true);
     setSearchState("loading");
     setSearchMessage("");
 
     try {
       if (typeof suggestion.latitude === "number" && typeof suggestion.longitude === "number" && !suggestion.mapkitResult) {
         recenterMap(suggestion.latitude, suggestion.longitude, 0.003, 0.003);
+        switchMapToSatelliteAfterSearch();
         setSelectedPlace({
           latitude: suggestion.latitude,
           longitude: suggestion.longitude
         });
+        setSuppressSuggestionsUntilTyping(true);
         resetMeasurementSession();
         setSuggestions([]);
         setAutocompleteState("idle");
@@ -731,10 +800,12 @@ export default function MapKitTestPage() {
       }
 
       recenterMap(bestMatch.latitude, bestMatch.longitude, 0.003, 0.003);
+      switchMapToSatelliteAfterSearch();
       setSelectedPlace({
         latitude: bestMatch.latitude,
         longitude: bestMatch.longitude
       });
+      setSuppressSuggestionsUntilTyping(true);
       resetMeasurementSession();
       setSuggestions([]);
       setAutocompleteState("idle");
@@ -762,7 +833,7 @@ export default function MapKitTestPage() {
           position: "absolute",
           top: 16,
           left: 16,
-          zIndex: 2,
+          zIndex: 3,
           width: "min(420px, calc(100vw - 32px))",
           display: "grid",
           gap: 8
@@ -850,7 +921,10 @@ export default function MapKitTestPage() {
           <input
             aria-label="Search address"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setSuppressSuggestionsUntilTyping(false);
+              setQuery(event.target.value);
+            }}
             placeholder="Search street address"
             style={{
               flex: 1,
@@ -961,7 +1035,7 @@ export default function MapKitTestPage() {
           top: 16,
           left: "50%",
           transform: "translateX(-50%)",
-          zIndex: 2,
+          zIndex: 3,
           display: "grid",
           justifyItems: "center",
           gap: 8
@@ -1087,42 +1161,10 @@ export default function MapKitTestPage() {
         ref={mapRef}
         style={{
           position: "absolute",
-          inset: 0
+          inset: 0,
+          zIndex: 0
         }}
       />
-      <svg
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          inset: 0,
-          zIndex: 1,
-          pointerEvents: "none"
-        }}
-      >
-        {projectedMeasurementSegments.map((segment) => (
-          <line
-            key={segment.id}
-            x1={segment.x1}
-            y1={segment.y1}
-            x2={segment.x2}
-            y2={segment.y2}
-            stroke="#1f2522"
-            strokeWidth="4"
-            strokeLinecap="round"
-          />
-        ))}
-        {projectedMeasurementPoints.map((point) => (
-          <circle
-            key={point.id}
-            cx={point.x}
-            cy={point.y}
-            r={point.kind === "pending" ? 7 : 6}
-            fill={point.kind === "pending" ? "#ffffff" : "#1f2522"}
-            stroke="#ffffff"
-            strokeWidth={point.kind === "pending" ? 3 : 2}
-          />
-        ))}
-      </svg>
     </main>
   );
 }
