@@ -17,6 +17,11 @@ type MapKitCoordinateRegion = {
   span: MapKitCoordinateSpan;
 };
 
+type MapKitPoint = {
+  x: number;
+  y: number;
+};
+
 type MapKitAutocompleteResult = {
   displayLines?: string[];
   title?: string;
@@ -97,6 +102,35 @@ declare global {
       Coordinate: new (latitude: number, longitude: number) => MapKitCoordinate;
       CoordinateSpan: new (latitudeDelta: number, longitudeDelta: number) => MapKitCoordinateSpan;
       CoordinateRegion: new (center: MapKitCoordinate, span: MapKitCoordinateSpan) => MapKitCoordinateRegion;
+      MarkerAnnotation?: new (
+        coordinate: MapKitCoordinate,
+        options?: {
+          title?: string;
+          subtitle?: string;
+          color?: string;
+          glyphText?: string;
+        }
+      ) => {
+        coordinate: MapKitCoordinate;
+        title?: string;
+        subtitle?: string;
+      };
+      Annotation?: new (
+        coordinate: MapKitCoordinate,
+        factory: (coordinate: MapKitCoordinate, options?: unknown) => HTMLElement,
+        options?: {
+          title?: string;
+          subtitle?: string;
+          anchorOffset?: MapKitPoint;
+          size?: { width: number; height: number };
+          data?: unknown;
+        }
+      ) => {
+        coordinate: MapKitCoordinate;
+        element?: HTMLElement;
+        title?: string;
+        subtitle?: string;
+      };
       MapType: {
         Satellite: "satellite";
         Hybrid: "hybrid";
@@ -116,6 +150,8 @@ declare global {
       ) => {
         region: MapKitCoordinateRegion;
         mapType: "satellite" | "hybrid" | "mutedStandard" | "standard";
+        addAnnotation: (annotation: unknown) => unknown;
+        removeAnnotation: (annotation: unknown) => void;
         addEventListener: (type: string, listener: (event: Record<string, unknown>) => void) => void;
         removeEventListener: (type: string, listener: (event: Record<string, unknown>) => void) => void;
         convertPointOnPageToCoordinate: (point: DOMPoint) => MapKitCoordinate;

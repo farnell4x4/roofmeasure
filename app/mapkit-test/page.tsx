@@ -10,9 +10,45 @@ import {
 } from "@/lib/mapkit/client";
 import { AddressSuggestion } from "@/types/mapkit";
 
+type LocationPermission = PermissionState | "unsupported";
+
+async function getLocationPermission(): Promise<LocationPermission> {
+  if (typeof navigator === "undefined" || !navigator.permissions || typeof navigator.permissions.query !== "function") {
+    return "unsupported";
+  }
+
+  try {
+    const status = await navigator.permissions.query({ name: "geolocation" as PermissionName });
+    return status.state;
+  } catch {
+    return "unsupported";
+  }
+}
+
+async function requestCurrentLocation() {
+  return new Promise<GeolocationPosition>((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 10_000,
+      maximumAge: 30_000
+    });
+  });
+}
+
 export default function MapKitTestPage() {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<InstanceType<NonNullable<NonNullable<Window["mapkit"]>["Map"]>> | null>(null);
+  const hasCenteredOnUserLocationRef = useRef(false);
+  const selectedPlaceAnnotationRef = useRef<unknown>(null);
+  const currentLocationAnnotationRef = useRef<unknown>(null);
+  const locationBiasRef = useRef<{
+    centerLat: number;
+    centerLng: number;
+    latSpan: number;
+    lngSpan: number;
+    countryCode?: string;
+  } | null>(null);
+  const [mapReady, setMapReady] = useState(false);
   const [query, setQuery] = useState("");
   const [searchState, setSearchState] = useState<"idle" | "loading" | "error">("idle");
   const [searchMessage, setSearchMessage] = useState("");
@@ -26,6 +62,8 @@ export default function MapKitTestPage() {
     lngSpan: number;
     countryCode?: string;
   } | null>(null);
+  const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [selectedPlace, setSelectedPlace] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationState, setLocationState] = useState<
     "idle" | "requesting" | "granted" | "denied" | "unsupported" | "error" | "prompt"
   >("idle");
@@ -34,7 +72,64 @@ export default function MapKitTestPage() {
   const safariLocationHelp =
     'In Safari, open Website Settings for this page and change Location to "Allow", then reload this page.';
 
-  async function requestLocationBias() {
+  useEffect(() => {
+    locationBiasRef.current = locationBias;
+  }, [locationBias]);
+
+  function removeAnnotation(annotationRef: React.MutableRefObject<unknown>) {
+    const map = mapInstanceRef.current;
+    if (!map || !annotationRef.current) return;
+    map.removeAnnotation(annotationRef.current);
+    annotationRef.current = null;
+  }
+
+  function syncSelectedPlaceAnnotation(place: { latitude: number; longitude: number } | null) {
+    const mapkit = window.mapkit;
+    const map = mapInstanceRef.current;
+    if (!mapkit?.MarkerAnnotation || !map) return;
+
+    removeAnnotation(selectedPlaceAnnotationRef);
+
+    if (!place) return;
+
+    const annotation = new mapkit.MarkerAnnotation(new mapkit.Coordinate(place.latitude, place.longitude), {
+      color: "#d94b3d"
+    });
+    selectedPlaceAnnotationRef.current = annotation;
+    map.addAnnotation(annotation);
+  }
+
+  function syncCurrentLocationAnnotation(location: { latitude: number; longitude: number } | null) {
+    const mapkit = window.mapkit;
+    const map = mapInstanceRef.current;
+    if (!mapkit?.Annotation || !map) return;
+
+    removeAnnotation(currentLocationAnnotationRef);
+
+    if (!location) return;
+
+    const annotation = new mapkit.Annotation(
+      new mapkit.Coordinate(location.latitude, location.longitude),
+      () => {
+        const element = document.createElement("div");
+        element.style.width = "14px";
+        element.style.height = "14px";
+        element.style.borderRadius = "999px";
+        element.style.background = "#0a84ff";
+        element.style.border = "3px solid rgba(255,255,255,0.95)";
+        element.style.boxShadow = "0 0 0 6px rgba(10, 132, 255, 0.18), 0 6px 18px rgba(10, 132, 255, 0.28)";
+        return element;
+      },
+      {
+        size: { width: 14, height: 14 }
+      }
+    );
+
+    currentLocationAnnotationRef.current = annotation;
+    map.addAnnotation(annotation);
+  }
+
+  async function loadCurrentLocation() {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
       setLocationState("unsupported");
       setLocationAlert("Location access is unavailable in this browser. Search will still work, but results may be less local.");
@@ -43,62 +138,76 @@ export default function MapKitTestPage() {
 
     setLocationState("requesting");
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocationBias({
-          centerLat: position.coords.latitude,
-          centerLng: position.coords.longitude,
-          latSpan: 0.2,
-          lngSpan: 0.2,
-          countryCode: "US"
-        });
-        setLocationState("granted");
-        setLocationAlert("");
-      },
-      (error) => {
-        if (error.code === error.PERMISSION_DENIED) {
+    try {
+      const position = await requestCurrentLocation();
+      setLocationBias({
+        centerLat: position.coords.latitude,
+        centerLng: position.coords.longitude,
+        latSpan: 0.2,
+        lngSpan: 0.2,
+        countryCode: "US"
+      });
+      setCurrentLocation({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude
+      });
+      setLocationState("granted");
+      setLocationAlert("Using your current location to improve nearby address suggestions.");
+    } catch (error) {
+      const geolocationError =
+        error && typeof error === "object" && "code" in error ? (error as GeolocationPositionError) : null;
+
+      if (geolocationError) {
+        if (geolocationError.code === geolocationError.PERMISSION_DENIED) {
           setLocationState("denied");
-          setLocationAlert(
-            `Location access is denied for this site. ${safariLocationHelp}`
-          );
+          setLocationAlert(`Location access is denied for this site. ${safariLocationHelp}`);
           return;
         }
 
-        setLocationState("error");
-        setLocationAlert("We could not get your location right now. Search will continue without local bias.");
-      },
-      {
-        enableHighAccuracy: false,
-        maximumAge: 300000,
-        timeout: 10000
+        if (geolocationError.code === geolocationError.POSITION_UNAVAILABLE) {
+          setLocationState("error");
+          setLocationAlert("Your permission is granted, but your location is currently unavailable. Search will continue without local bias.");
+          return;
+        }
+
+        if (geolocationError.code === geolocationError.TIMEOUT) {
+          setLocationState("error");
+          setLocationAlert("Location lookup timed out. Try again to improve nearby address suggestions.");
+          return;
+        }
       }
-    );
+
+      setLocationState("error");
+      setLocationAlert("We could not get your location right now. Search will continue without local bias.");
+    }
   }
 
   useEffect(() => {
     let cancelled = false;
-    const mapkitWindow = window as Window & { mapkit?: NonNullable<Window["mapkit"]> };
 
     async function run() {
       try {
         await loadMapKit();
-
-        if (cancelled || !mapkitWindow.mapkit) {
-          throw new Error("window.mapkit was not defined after script load.");
-        }
+        const mapkit = window.mapkit;
 
         if (cancelled || !mapRef.current) return;
+        if (!mapkit) {
+          setSearchState("error");
+          setSearchMessage("MapKit did not finish loading.");
+          return;
+        }
 
-        const center = new mapkitWindow.mapkit.Coordinate(39.5501, -105.7821);
-        const span = new mapkitWindow.mapkit.CoordinateSpan(0.04, 0.04);
-        const region = new mapkitWindow.mapkit.CoordinateRegion(center, span);
+        const center = new mapkit.Coordinate(39.5501, -105.7821);
+        const span = new mapkit.CoordinateSpan(0.04, 0.04);
+        const region = new mapkit.CoordinateRegion(center, span);
 
-        mapInstanceRef.current = new mapkitWindow.mapkit.Map(mapRef.current, {
+        mapInstanceRef.current = new mapkit.Map(mapRef.current, {
           region,
           showsCompass: "visible",
           showsMapTypeControl: true,
-          mapType: mapkitWindow.mapkit.MapType?.Standard
+          mapType: mapkit.MapType?.Standard
         });
+        setMapReady(true);
       } catch (error) {
         console.error("MapKit test page failed to initialize.", error);
         setSearchState("error");
@@ -110,48 +219,97 @@ export default function MapKitTestPage() {
 
     return () => {
       cancelled = true;
+      setMapReady(false);
+      selectedPlaceAnnotationRef.current = null;
+      currentLocationAnnotationRef.current = null;
       mapInstanceRef.current?.destroy?.();
       mapInstanceRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    async function requestLocation() {
-      if (typeof navigator === "undefined") return;
+    let permissionStatus: PermissionStatus | null = null;
+    let cancelled = false;
 
-      if ("permissions" in navigator && typeof navigator.permissions.query === "function") {
-        try {
-          const status = await navigator.permissions.query({ name: "geolocation" as PermissionName });
-          if (status.state === "granted") {
-            void requestLocationBias();
-            return;
-          }
+    async function refreshLocationPermission() {
+      const permission = await getLocationPermission();
+      if (cancelled) return;
 
-          if (status.state === "prompt") {
-            setLocationState("prompt");
-            setLocationAlert("Allow location to improve nearby address suggestions.");
-            return;
-          }
-
-          if (status.state === "denied") {
-            setLocationState("denied");
-            setLocationAlert(
-              `Location access is denied for this site. ${safariLocationHelp}`
-            );
-            return;
-          }
-        } catch {
-          setLocationState("prompt");
-          setLocationAlert("Allow location to improve nearby address suggestions.");
-          return;
-        }
+      if (permissionStatus) {
+        permissionStatus.onchange = null;
+        permissionStatus = null;
       }
 
-      setLocationState("prompt");
-      setLocationAlert("Allow location to improve nearby address suggestions.");
+      if (permission === "granted") {
+        setLocationState("granted");
+        if (!locationBiasRef.current) {
+          setLocationAlert("Location access is allowed. Fetching your current location for nearby suggestions.");
+          void loadCurrentLocation();
+        } else {
+          setLocationAlert("Using your current location to improve nearby address suggestions.");
+        }
+        return;
+      }
+
+      if (permission === "denied") {
+        setLocationState("denied");
+        setLocationAlert(`Location access is denied for this site. ${safariLocationHelp}`);
+        return;
+      }
+
+      if (permission === "prompt") {
+        setLocationState("prompt");
+        setLocationAlert("Allow location to improve nearby address suggestions.");
+      } else {
+        setLocationState("unsupported");
+        setLocationAlert("Location permission status is unavailable here. Use my location to try the browser geolocation API directly.");
+      }
+
+      if (!navigator.permissions || typeof navigator.permissions.query !== "function") {
+        return;
+      }
+
+      try {
+        permissionStatus = await navigator.permissions.query({ name: "geolocation" as PermissionName });
+        if (cancelled) return;
+        permissionStatus.onchange = () => {
+          setLocationState(permissionStatus!.state);
+          if (permissionStatus!.state === "granted") {
+            void loadCurrentLocation();
+            return;
+          }
+
+          if (permissionStatus!.state === "denied") {
+            setLocationAlert(`Location access is denied for this site. ${safariLocationHelp}`);
+            return;
+          }
+
+          setLocationAlert("Allow location to improve nearby address suggestions.");
+        };
+      } catch {
+        if (!cancelled) {
+          setLocationState("unsupported");
+          setLocationAlert("Location permission status is unavailable here. Use my location to try the browser geolocation API directly.");
+        }
+      }
     }
 
-    void requestLocation();
+    function handleReturnToPage() {
+      if (document.visibilityState === "visible") {
+        void refreshLocationPermission();
+      }
+    }
+
+    void refreshLocationPermission();
+    window.addEventListener("focus", handleReturnToPage);
+    document.addEventListener("visibilitychange", handleReturnToPage);
+
+    return () => {
+      cancelled = true;
+      if (permissionStatus) permissionStatus.onchange = null;
+      window.removeEventListener("focus", handleReturnToPage);
+      document.removeEventListener("visibilitychange", handleReturnToPage);
+    };
   }, []);
 
   useEffect(() => {
@@ -203,7 +361,7 @@ export default function MapKitTestPage() {
     };
   }, [locationBias, query]);
 
-  function recenterMap(latitude: number, longitude: number) {
+  function recenterMap(latitude: number, longitude: number, latDelta?: number, lngDelta?: number) {
     const mapkitWindow = window as Window & { mapkit?: NonNullable<Window["mapkit"]> };
     const map = mapInstanceRef.current;
     if (!mapkitWindow.mapkit || !map) {
@@ -213,11 +371,30 @@ export default function MapKitTestPage() {
     const span = map.region?.span;
     const region = new mapkitWindow.mapkit.CoordinateRegion(
       new mapkitWindow.mapkit.Coordinate(latitude, longitude),
-      new mapkitWindow.mapkit.CoordinateSpan(span?.latitudeDelta ?? 0.01, span?.longitudeDelta ?? 0.01)
+      new mapkitWindow.mapkit.CoordinateSpan(latDelta ?? span?.latitudeDelta ?? 0.01, lngDelta ?? span?.longitudeDelta ?? 0.01)
     );
 
     map.region = region;
   }
+
+  useEffect(() => {
+    if (!mapReady || !currentLocation || selectedPlace || hasCenteredOnUserLocationRef.current) {
+      return;
+    }
+
+    recenterMap(currentLocation.latitude, currentLocation.longitude, 0.02, 0.02);
+    hasCenteredOnUserLocationRef.current = true;
+  }, [currentLocation, mapReady, selectedPlace]);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    syncCurrentLocationAnnotation(currentLocation);
+  }, [currentLocation, mapReady]);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    syncSelectedPlaceAnnotation(selectedPlace);
+  }, [currentLocation, mapReady, selectedPlace]);
 
   async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -252,12 +429,16 @@ export default function MapKitTestPage() {
         return;
       }
 
-      recenterMap(bestMatch.latitude, bestMatch.longitude);
+      recenterMap(bestMatch.latitude, bestMatch.longitude, 0.003, 0.003);
+      setSelectedPlace({
+        latitude: bestMatch.latitude,
+        longitude: bestMatch.longitude
+      });
       setSuggestions([]);
       setAutocompleteState("idle");
       setAutocompleteMessage("");
       setSearchState("idle");
-      setSearchMessage(bestMatch.formattedAddress || "Address found.");
+      setSearchMessage("");
     } catch (error) {
       console.error("Address lookup failed:", error);
       setSearchState("error");
@@ -272,12 +453,16 @@ export default function MapKitTestPage() {
 
     try {
       if (typeof suggestion.latitude === "number" && typeof suggestion.longitude === "number" && !suggestion.mapkitResult) {
-        recenterMap(suggestion.latitude, suggestion.longitude);
+        recenterMap(suggestion.latitude, suggestion.longitude, 0.003, 0.003);
+        setSelectedPlace({
+          latitude: suggestion.latitude,
+          longitude: suggestion.longitude
+        });
         setSuggestions([]);
         setAutocompleteState("idle");
         setAutocompleteMessage("");
         setSearchState("idle");
-        setSearchMessage(suggestion.formattedAddress || "Address found.");
+        setSearchMessage("");
         return;
       }
 
@@ -300,12 +485,16 @@ export default function MapKitTestPage() {
         return;
       }
 
-      recenterMap(bestMatch.latitude, bestMatch.longitude);
+      recenterMap(bestMatch.latitude, bestMatch.longitude, 0.003, 0.003);
+      setSelectedPlace({
+        latitude: bestMatch.latitude,
+        longitude: bestMatch.longitude
+      });
       setSuggestions([]);
       setAutocompleteState("idle");
       setAutocompleteMessage("");
       setSearchState("idle");
-      setSearchMessage(bestMatch.formattedAddress || "Address found.");
+      setSearchMessage("");
     } catch (error) {
       console.error("Suggestion lookup failed:", error);
       setSearchState("error");
@@ -355,7 +544,7 @@ export default function MapKitTestPage() {
             {locationState === "prompt" || locationState === "error" || locationState === "idle" ? (
               <button
                 type="button"
-                onClick={() => void requestLocationBias()}
+                onClick={() => void loadCurrentLocation()}
                 style={{
                   justifySelf: "start",
                   borderRadius: 12,
@@ -368,6 +557,11 @@ export default function MapKitTestPage() {
               >
                 Use my location
               </button>
+            ) : null}
+            {locationState === "granted" && locationBias ? (
+              <div style={{ fontSize: 13, color: "#6d4a22" }}>
+                Using location near {locationBias.centerLat.toFixed(4)}, {locationBias.centerLng.toFixed(4)}.
+              </div>
             ) : null}
             {locationState === "denied" ? (
               <div style={{ fontSize: 13, color: "#6d4a22" }}>
@@ -500,8 +694,8 @@ export default function MapKitTestPage() {
       <div
         ref={mapRef}
         style={{
-          width: "100%",
-          height: "100%"
+          position: "absolute",
+          inset: 0
         }}
       />
     </main>
