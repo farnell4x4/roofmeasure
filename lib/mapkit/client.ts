@@ -350,7 +350,6 @@ function createSearch(bias?: SearchBias) {
     includePointsOfInterest: false,
     includeQueries: false,
     limitToCountries: "US",
-    getsUserLocation: true,
     region: createBiasRegion(bias) ?? undefined,
     regionPriority: "default"
   });
@@ -358,7 +357,7 @@ function createSearch(bias?: SearchBias) {
 
 function createGeocoder() {
   if (!window.mapkit?.Geocoder) return null;
-  return new window.mapkit.Geocoder({ language: "en", getsUserLocation: true } as { language: string; getsUserLocation: boolean });
+  return new window.mapkit.Geocoder({ language: "en" });
 }
 
 function createBiasRegion(bias?: SearchBias) {
