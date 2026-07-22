@@ -41,6 +41,7 @@ import { createTieInSegment } from "@/lib/measurement/tie-in"
 import { appendPersistenceDebugNote } from "@/lib/debug/persistence-debug"
 import { db } from "@/lib/persistence/db"
 import { createEmptyProject } from "@/lib/projects/project-factory"
+import { FirstRunOnboarding } from "@/components/app/FirstRunOnboarding"
 import { haversineDistanceFeet } from "@/lib/measurement/geometry"
 import { roundMeasurement } from "@/lib/measurement/rounding"
 import {
@@ -416,6 +417,7 @@ function MapKitTestPage() {
   const [activeSinglePitch, setActiveSinglePitch] = useState("6/12")
   const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] =
     useState(false)
+  const [tutorialReplayVersion, setTutorialReplayVersion] = useState(0)
   const [precisionZoom, setPrecisionZoom] = useState(DEFAULT_PRECISION_ZOOM)
   const [projectionRevision, setProjectionRevision] = useState(0)
   const [projectedMeasurementOverlay, setProjectedMeasurementOverlay] =
@@ -2660,7 +2662,7 @@ function MapKitTestPage() {
             borderRadius: 18,
             background: "rgba(255, 255, 255, 0.92)",
             border: "1px solid rgba(31, 37, 34, 0.12)",
-            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
+            boxShadow: "0 14px 50px rgba(20, 24, 22, 0.16)",
           }}
         >
           <Search size={18} color="#5f685f" />
@@ -2746,7 +2748,7 @@ function MapKitTestPage() {
                 borderRadius: 16,
                 background: "rgba(255, 255, 255, 0.96)",
                 border: "1px solid rgba(31, 37, 34, 0.12)",
-                boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
+                boxShadow: "0 14px 50px rgba(20, 24, 22, 0.16)",
               }}
             >
               <button
@@ -2763,6 +2765,23 @@ function MapKitTestPage() {
               >
                 Projects
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMeasurementSettingsOpen(false)
+                  setTutorialReplayVersion((current) => current + 1)
+                }}
+                style={{
+                  border: 0,
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  background: "rgba(31, 37, 34, 0.08)",
+                  color: "#1f2522",
+                  cursor: "pointer",
+                }}
+              >
+                Tutorial
+              </button>
             </div>
           ) : null}
         </div>
@@ -2775,7 +2794,7 @@ function MapKitTestPage() {
               borderRadius: 18,
               background: "rgba(255, 255, 255, 0.96)",
               border: "1px solid rgba(31, 37, 34, 0.12)",
-              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
+              boxShadow: "0 14px 50px rgba(20, 24, 22, 0.16)",
             }}
           >
             {suggestions.map((suggestion) => (
@@ -2871,7 +2890,7 @@ function MapKitTestPage() {
             borderRadius: 16,
             background: "rgba(255, 255, 255, 0.97)",
             border: "1px solid rgba(31, 37, 34, 0.12)",
-            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
+            boxShadow: "0 14px 50px rgba(20, 24, 22, 0.16)",
           }}
         >
           <button
@@ -2924,7 +2943,7 @@ function MapKitTestPage() {
             borderRadius: 16,
             background: "rgba(255, 255, 255, 0.97)",
             border: "1px solid rgba(31, 37, 34, 0.12)",
-            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
+            boxShadow: "0 14px 50px rgba(20, 24, 22, 0.16)",
           }}
         >
           <button
@@ -2995,7 +3014,7 @@ function MapKitTestPage() {
             borderRadius: 16,
             background: "rgba(255, 255, 255, 0.97)",
             border: "1px solid rgba(31, 37, 34, 0.12)",
-            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
+            boxShadow: "0 14px 50px rgba(20, 24, 22, 0.16)",
           }}
         >
           <label
@@ -3086,8 +3105,8 @@ function MapKitTestPage() {
             borderRadius: 16,
             background: "rgba(255, 255, 255, 0.97)",
             border: "1px solid rgba(31, 37, 34, 0.12)",
-            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
-          }}
+            boxShadow: "0 14px 50px rgba(20, 24, 22, 0.16)",
+          }}  
         >
           {SEGMENT_TYPE_OPTIONS.map((option) => (
             <button
@@ -3335,6 +3354,7 @@ function MapKitTestPage() {
           />
         ) : null}
       </div>
+      <FirstRunOnboarding replayVersion={tutorialReplayVersion} />
     </main>
   )
 }

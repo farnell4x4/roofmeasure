@@ -116,6 +116,7 @@ export type AppPreferences = {
   unitSystem: UnitSystem;
   displayDecimalFeet: boolean;
   darkMode: "system" | "light" | "dark";
+  onboardingDismissed?: boolean;
 };
 
 export type ProjectCalculations = {
