@@ -51,6 +51,8 @@ body {
     var(--bg);
   color: var(--ink);
   font-family: var(--font-sans);
+  touch-action: none;
+  overscroll-behavior: none;
 }
 
 body {
