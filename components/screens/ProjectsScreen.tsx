@@ -215,7 +215,7 @@ export function ProjectsScreen() {
                 <Button onClick={() => kind === "image" ? router.push(`/image?projectId=${project.id}`) : handleOpenProject(project)}>
                   <FolderOpen size={18} /> Open
                 </Button>
-                {kind === "map" ? <Button variant="secondary" onClick={() => router.push(`/report?projectId=${project.id}`)}><FileText size={18} /> View Report</Button> : null}
+                <Button variant="secondary" onClick={() => router.push(`/report?projectId=${encodeURIComponent(project.id)}${kind === "image" ? "&projectType=image" : ""}`)}><FileText size={18} /> View Report</Button>
                 <Button
                   variant="danger"
                   onClick={() => kind === "image" ? handleDeleteImageProject(project.id) : handleDeleteProject(project.id)}

@@ -1,11 +1,12 @@
 "use client"
 
-import { FileImage, Minus, Plus, RotateCcw, Settings } from "lucide-react"
+import { FileImage, FileText, Minus, Plus, RotateCcw, Settings } from "lucide-react"
 import { ChangeEvent, PointerEvent as ReactPointerEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState, WheelEvent as ReactWheelEvent } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { db } from "@/lib/persistence/db"
 import { detectImageRoofPlanes } from "@/lib/image-projects/plane-detection"
 import { createImageProject, readImageDimensions } from "@/lib/image-projects/factory"
+import { snapImagePointToMeasurementLine, splitImageMeasurementSegmentsAtKnownPoints } from "@/lib/image-projects/snapping"
 import { MEASUREMENT_TYPES } from "@/lib/measurement/constants"
 import { roundMeasurement } from "@/lib/measurement/rounding"
 import type { MeasurementType } from "@/types/models"
@@ -119,7 +120,19 @@ function ImageProjectScreen() {
     save(mutator(current))
   }
   function updateSegments(segments: ImageMeasurementSegment[], pendingLineStart?: ImagePoint | null) {
-    update((current) => ({ ...current, segments, pendingLineStart: pendingLineStart === undefined ? current.pendingLineStart : pendingLineStart, planes: detectImageRoofPlanes(segments, current.planes) }))
+    update((current) => {
+      const nextPendingLineStart = pendingLineStart === undefined ? current.pendingLineStart : pendingLineStart
+      const normalizedSegments = splitImageMeasurementSegmentsAtKnownPoints(segments, [
+        ...segments.flatMap((segment) => [segment.start, segment.end]),
+        ...(nextPendingLineStart ? [nextPendingLineStart] : []),
+      ])
+      return {
+        ...current,
+        segments: normalizedSegments,
+        pendingLineStart: nextPendingLineStart,
+        planes: detectImageRoofPlanes(normalizedSegments, current.planes),
+      }
+    })
   }
   function setZoom(next: ImageZoom) {
     const clampedScale = Math.min(MAX_IMAGE_ZOOM, Math.max(1, next.scale))
@@ -193,8 +206,9 @@ function ImageProjectScreen() {
     if (ignoreNextStageClick.current) { ignoreNextStageClick.current = false; return }
     const current = imageProjectRef.current
     if (!current || decision) return
-    const point = stagePoint(event)
-    if (!point) return
+    const rawPoint = stagePoint(event)
+    if (!rawPoint) return
+    const point = snapImagePointToMeasurementLine(rawPoint, current.segments, current.imageWidth, current.imageHeight)
     closeMenus()
     if (!current.pendingLineStart) { updateSegments(current.segments, point); setComeFromArmed(false); return }
     if (comeFromArmed) {
@@ -282,9 +296,15 @@ function ImageProjectScreen() {
   function openPointMenu(event: React.MouseEvent, point: ImagePoint) { event.stopPropagation(); setDecision(null); setLineMenu(null); setPitchMenu(null); setPointMenu({ point, anchor: { x: event.clientX, y: event.clientY } }) }
   function movePoint(event: ReactPointerEvent<HTMLButtonElement>) {
     const drag = pointDrag.current
-    const next = stagePoint(event)
+    const rawPoint = stagePoint(event)
     const current = imageProjectRef.current
-    if (!current || !drag || drag.pointerId !== event.pointerId || !next) return
+    if (!current || !drag || drag.pointerId !== event.pointerId || !rawPoint) return
+    const next = snapImagePointToMeasurementLine(
+      rawPoint,
+      current.segments.filter((segment) => imagePointKey(segment.start) !== drag.key && imagePointKey(segment.end) !== drag.key),
+      current.imageWidth,
+      current.imageHeight,
+    )
     event.preventDefault(); event.stopPropagation()
     updateSegments(current.segments.map((segment) => ({ ...segment, start: imagePointKey(segment.start) === drag.key ? next : segment.start, end: imagePointKey(segment.end) === drag.key ? next : segment.end })), current.pendingLineStart && imagePointKey(current.pendingLineStart) === drag.key ? next : current.pendingLineStart)
     drag.key = imagePointKey(next)
@@ -318,6 +338,7 @@ function ImageProjectScreen() {
       {[...pointMap.entries()].map(([key, point]) => { const visual = visualPoint(point); if (!visual) return null; const pending = project.pendingLineStart && imagePointKey(project.pendingLineStart) === key; return <button key={key} type="button" aria-label="Move measurement point" onClick={(event) => openPointMenu(event, point)} onPointerDown={(event) => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); pointDrag.current = { pointerId: event.pointerId, key } }} onPointerMove={movePoint} onPointerUp={(event) => { if (pointDrag.current?.pointerId === event.pointerId) { event.currentTarget.releasePointerCapture(event.pointerId); pointDrag.current = null } }} onPointerCancel={() => { pointDrag.current = null }} style={{ position: "absolute", zIndex: 2, pointerEvents: "auto", left: visual.x, top: visual.y, width: 28, height: 28, transform: "translate(-50%,-50%)", border: 0, borderRadius: 999, background: "transparent", cursor: "grab", touchAction: "none", display: "grid", placeItems: "center" }}><span style={{ width: 10, height: 10, borderRadius: 999, border: pending ? "2px solid #1f2522" : "2px solid rgba(255,255,255,.95)", background: pending ? "#fff" : "#1f2522", boxShadow: "0 6px 18px rgba(20,24,22,.22)" }}/></button> })}
       </div>
     </div>
+    {project.segments.length > 0 ? <button type="button" onClick={() => router.push(`/report?projectId=${encodeURIComponent(project.id)}&projectType=image`)} style={{ position: "absolute", right: 14, bottom: 14, zIndex: 3, display: "flex", alignItems: "center", gap: 7, border: 0, borderRadius: 999, padding: "8px 12px", background: "rgba(31, 37, 34, 0.88)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}><FileText size={16}/> View Report</button> : null}
     {decision ? <div style={{ ...popupStyle, position: "fixed", left: Math.min(decision.anchor.x + 16, window.innerWidth - 176), top: Math.min(decision.anchor.y + 16, window.innerHeight - 150) }}><button type="button" onClick={() => applyDecision("continue")} style={{ ...buttonStyle, background: "#1f2522", color: "#fff" }}>Continue</button><button type="button" onClick={() => applyDecision("new")} style={{ ...buttonStyle, background: "rgba(31,37,34,.08)" }}>Start New</button><button type="button" onClick={closeMenus} style={{ ...buttonStyle, padding: 4, background: "transparent", color: "#5f685f" }}>Close</button></div> : null}
     {pointMenu ? <div style={{ ...popupStyle, position: "fixed", left: Math.min(pointMenu.anchor.x + 16, window.innerWidth - 176), top: Math.min(pointMenu.anchor.y + 16, window.innerHeight - 176) }}><button type="button" onClick={() => comeTo(pointMenu.point)} style={{ ...buttonStyle, background: "#1f2522", color: "#fff" }}>Come To</button><button type="button" onClick={() => comeFrom(pointMenu.point)} style={{ ...buttonStyle, background: "rgba(31,37,34,.08)" }}>Come From</button><button type="button" onClick={() => deletePoint(pointMenu.point)} style={{ ...buttonStyle, background: "rgba(184,53,47,.1)", color: "#a62d27" }}>Delete</button></div> : null}
     {lineMenu && project.segments.find((segment) => segment.id === lineMenu.segmentId) ? <LineEditor segment={project.segments.find((segment) => segment.id === lineMenu.segmentId)!} anchor={lineMenu.anchor} onClose={() => setLineMenu(null)} onChange={(patch) => editLine(lineMenu.segmentId, patch)}/> : null}
@@ -327,5 +348,26 @@ function ImageProjectScreen() {
 }
 
 function LineEditor({ segment, anchor, onClose, onChange }: { segment: ImageMeasurementSegment; anchor: Anchor; onClose: () => void; onChange: (patch: Partial<Pick<ImageMeasurementSegment, "lengthFeet" | "type">>) => void }) {
-  return <div style={{ ...popupStyle, position: "fixed", left: Math.min(anchor.x - 72, window.innerWidth - 172), top: Math.min(anchor.y + 16, window.innerHeight - 330) }}><label style={{ display: "grid", gap: 5, fontSize: 13, fontWeight: 700 }}>Length (ft)<input aria-label="Line length in feet" type="number" min="0" step=".01" autoFocus value={segment.lengthFeet || ""} onChange={(event) => onChange({ lengthFeet: Number(event.target.value) || 0 })} style={{ border: "1px solid rgba(31,37,34,.18)", borderRadius: 10, padding: 8 }}/></label>{MEASUREMENT_TYPES.map((option) => <button key={option.type} type="button" onClick={() => onChange({ type: option.type as MeasurementType })} style={{ ...buttonStyle, padding: "7px 9px", textAlign: "left", background: segment.type === option.type ? "#1f2522" : "rgba(31,37,34,.08)", color: segment.type === option.type ? "#fff" : "#1f2522" }}>{option.label}</button>)}<button type="button" onClick={onClose} style={{ ...buttonStyle, padding: 5, background: "transparent", color: "#5f685f" }}>Done</button></div>
+  const left = Math.max(12, Math.min(anchor.x - 140, window.innerWidth - 292))
+  const top = Math.max(12, Math.min(anchor.y + 16, window.innerHeight - 318))
+
+  return <div role="dialog" aria-label="Edit measurement line" style={{ ...popupStyle, position: "fixed", left, top, width: "min(280px, calc(100vw - 24px))", gap: 12 }}>
+    <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
+      <span>Length</span>
+      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input aria-label="Line length in feet" type="number" min="0" step=".01" autoFocus value={segment.lengthFeet || ""} onChange={(event) => onChange({ lengthFeet: Number(event.target.value) || 0 })} style={{ width: "100%", minWidth: 0, border: "1px solid rgba(31,37,34,.18)", borderRadius: 10, padding: 10, background: "#fff" }}/>
+        <span style={{ color: "#5f685f" }}>ft</span>
+      </span>
+    </label>
+    <div style={{ display: "grid", gap: 7 }}>
+      <span style={{ fontSize: 13, fontWeight: 700 }}>Line type</span>
+      <div role="group" aria-label="Line type" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 7 }}>
+        {MEASUREMENT_TYPES.map((option) => {
+          const selected = segment.type === option.type
+          return <button key={option.type} type="button" aria-pressed={selected} onClick={() => onChange({ type: option.type as MeasurementType })} style={{ ...buttonStyle, minWidth: 0, padding: "9px 10px", background: selected ? option.color : "rgba(31,37,34,.08)", color: selected ? "#fff" : "#1f2522", fontWeight: selected ? 700 : 600 }}>{option.label}</button>
+        })}
+      </div>
+    </div>
+    <button type="button" onClick={onClose} style={{ ...buttonStyle, padding: "10px 12px", background: "#1f2522", color: "#fff", fontWeight: 700 }}>Done</button>
+  </div>
 }

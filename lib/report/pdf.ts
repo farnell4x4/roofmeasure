@@ -1,18 +1,18 @@
 import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib"
-import { calculateProjectTotals } from "@/lib/measurement/calculations"
 import { formatArea, formatLength } from "@/lib/measurement/units"
-import type { MeasurementType, Project, ProjectCalculations } from "@/types/models"
+import {
+  calculateReportTotals,
+  isImageProject,
+  reportDisplayDecimalFeet,
+  reportLineLengths,
+  reportLineTypes,
+  reportProjectLabel,
+  reportUnitSystem,
+  type ReportCalculations,
+  type ReportProject,
+} from "@/lib/report/model"
 
-export const REPORT_PDF_VERSION = 2
-
-export const REPORT_LINE_TYPES: Array<{ type: MeasurementType; label: string }> = [
-  { type: "ridge", label: "Ridge" },
-  { type: "hip", label: "Hip" },
-  { type: "valley", label: "Valley" },
-  { type: "rake", label: "Rake" },
-  { type: "eave", label: "Eave" },
-  { type: "wall", label: "Wall" },
-]
+export const REPORT_PDF_VERSION = 3
 
 const PAGE_WIDTH = 612
 const PAGE_HEIGHT = 792
@@ -39,42 +39,40 @@ export function reportTimestamp(value: string) {
   }).format(new Date(value))
 }
 
-export function reportDownloadName(project: Project) {
-  const name = (project.location?.formattedAddress ?? project.name)
+export function reportDownloadName(project: ReportProject) {
+  const name = reportProjectLabel(project)
     .replace(/[^a-z0-9]+/gi, "-")
     .replace(/^-|-$/g, "")
     .toLowerCase()
   return `${name || "roof-report"}.pdf`
 }
 
-function reportLabel(project: Project) {
-  return project.location?.formattedAddress ?? project.name
-}
-
-function reportFingerprintInput(project: Project, totals: ProjectCalculations) {
+function reportFingerprintInput(project: ReportProject, totals: ReportCalculations) {
+  const unitSystem = reportUnitSystem(project)
+  const displayDecimalFeet = reportDisplayDecimalFeet(project)
   return {
     version: REPORT_PDF_VERSION,
-    label: reportLabel(project),
-    unitSystem: project.preferences.unitSystem,
-    displayDecimalFeet: project.preferences.displayDecimalFeet,
+    source: isImageProject(project) ? "image" : "map",
+    label: reportProjectLabel(project),
+    unitSystem,
+    displayDecimalFeet,
     totals: {
       area: totals.totalSlopeAreaSqFt,
       squares: totals.totalSquares,
       measuredLength: totals.totalMeasuredLength,
       slopeAdjustedLength: totals.totalSlopeAdjustedLength,
       segmentCount: totals.segmentCount,
-      byType: REPORT_LINE_TYPES.map(({ type }) => ({
+      byType: reportLineTypes(project, totals).map(({ type }) => ({
         type,
-        measured: totals.totals[type],
-        slopeAdjusted: totals.slopeAdjustedTotals[type],
+        ...reportLineLengths(totals, type),
       })),
     },
   }
 }
 
 export function buildReportPdfFingerprint(
-  project: Project,
-  totals = calculateProjectTotals(project),
+  project: ReportProject,
+  totals = calculateReportTotals(project),
 ) {
   return JSON.stringify(reportFingerprintInput(project, totals))
 }
@@ -137,12 +135,12 @@ function drawWrappedText({
 }
 
 export async function createReportPdf(
-  project: Project,
-  totals = calculateProjectTotals(project),
+  project: ReportProject,
+  totals = calculateReportTotals(project),
   generatedAt = new Date().toISOString(),
 ) {
   const document = await PDFDocument.create()
-  document.setTitle(`Roof Tape Measure Report - ${reportLabel(project)}`)
+  document.setTitle(`Roof Tape Measure Report - ${reportProjectLabel(project)}`)
   document.setAuthor("RoofTapeMeasure.com")
   document.setSubject("Roof measurement report")
   document.setCreationDate(new Date(generatedAt))
@@ -150,7 +148,9 @@ export async function createReportPdf(
   const page = document.addPage([PAGE_WIDTH, PAGE_HEIGHT])
   const regular = await document.embedFont(StandardFonts.Helvetica)
   const bold = await document.embedFont(StandardFonts.HelveticaBold)
-  const label = pdfSafeText(reportLabel(project))
+  const label = pdfSafeText(reportProjectLabel(project))
+  const unitSystem = reportUnitSystem(project)
+  const displayDecimalFeet = reportDisplayDecimalFeet(project)
 
   page.drawRectangle({ x: 0, y: PAGE_HEIGHT - 164, width: PAGE_WIDTH, height: 164, color: DARK })
   page.drawText("ROOFTAPEMEASURE.COM", {
@@ -197,9 +197,9 @@ export async function createReportPdf(
   const summaryHeight = 64
   const summaryColumnWidth = CONTENT_WIDTH / 3
   const summaries = [
-    ["TOTAL ROOFING AREA", formatArea(totals.totalSlopeAreaSqFt, project.preferences.unitSystem)],
+    ["TOTAL ROOFING AREA", formatArea(totals.totalSlopeAreaSqFt, unitSystem)],
     ["ROOFING SQUARES", totals.totalSquares.toFixed(2)],
-    ["TOTAL LINEAR FOOTAGE", formatLength(totals.totalMeasuredLength, project.preferences.unitSystem, project.preferences.displayDecimalFeet)],
+    ["TOTAL LINEAR FOOTAGE", formatLength(totals.totalMeasuredLength, unitSystem, displayDecimalFeet)],
   ]
   page.drawRectangle({
     x: PAGE_MARGIN,
@@ -278,17 +278,18 @@ export async function createReportPdf(
     rowY -= 24
   }
 
-  REPORT_LINE_TYPES.forEach(({ type, label: rowLabel }) => {
+  reportLineTypes(project, totals).forEach(({ type, label: rowLabel }) => {
+    const lengths = reportLineLengths(totals, type)
     drawRow(
       rowLabel,
-      formatLength(totals.totals[type], project.preferences.unitSystem, project.preferences.displayDecimalFeet),
-      formatLength(totals.slopeAdjustedTotals[type], project.preferences.unitSystem, project.preferences.displayDecimalFeet),
+      formatLength(lengths.measured, unitSystem, displayDecimalFeet),
+      formatLength(lengths.slopeAdjusted, unitSystem, displayDecimalFeet),
     )
   })
   drawRow(
     "Total",
-    formatLength(totals.totalMeasuredLength, project.preferences.unitSystem, project.preferences.displayDecimalFeet),
-    formatLength(totals.totalSlopeAdjustedLength, project.preferences.unitSystem, project.preferences.displayDecimalFeet),
+    formatLength(totals.totalMeasuredLength, unitSystem, displayDecimalFeet),
+    formatLength(totals.totalSlopeAdjustedLength, unitSystem, displayDecimalFeet),
     true,
   )
 
@@ -337,7 +338,7 @@ export async function createReportPdf(
   return document.save()
 }
 
-export async function createCachedReportPdf(project: Project, totals = calculateProjectTotals(project)) {
+export async function createCachedReportPdf(project: ReportProject, totals = calculateReportTotals(project)) {
   const generatedAt = new Date().toISOString()
   const bytes = await createReportPdf(project, totals, generatedAt)
   return {

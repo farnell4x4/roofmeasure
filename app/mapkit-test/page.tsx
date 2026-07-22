@@ -12,7 +12,7 @@ import {
   useRef,
   useState,
 } from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
   loadMapKit,
   lookupStreetAddressWithBias,
@@ -66,7 +66,6 @@ import {
 type LocationPermission = PermissionState | "unsupported"
 const LOCATION_ALERT_DISMISSED_KEY =
   "roofmeasure.mapkit-test.location-alert-dismissed"
-const LAST_ACTIVE_PROJECT_ID_KEY = "roofmeasure.last-active-project-id"
 const SEARCH_MAX_ZOOM_SPAN = 0.00005
 const MAP_CAMERA_SAVE_DELAY_MS = 350
 const INITIAL_MAP_CENTER = { lat: 39.5501, lng: -105.7821 }
@@ -307,7 +306,6 @@ export default function Page() {
 }
 
 function MapKitTestPage() {
-  const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
   const projectId = searchParams.get("projectId")
@@ -506,15 +504,11 @@ function MapKitTestPage() {
     }
 
     async function hydrateProject() {
-      const fallbackProjectId =
-        !projectId && !newProjectRequested
-          ? window.localStorage.getItem(LAST_ACTIVE_PROJECT_ID_KEY)
-          : null
-      const requestedProjectId = projectId ?? fallbackProjectId
-
-      if (newProjectRequested) {
+      if (newProjectRequested || !projectId) {
         appendPersistenceDebugNote(
-          "IndexedDB HYDRATION SKIPPED • New-project session requested",
+          newProjectRequested
+            ? "IndexedDB HYDRATION SKIPPED • New-project session requested"
+            : "IndexedDB HYDRATION SKIPPED • Home page requested without a project",
         )
         currentProjectIdRef.current = null
         pendingProjectRef.current = null
@@ -545,17 +539,12 @@ function MapKitTestPage() {
 
       setProjectHydrated(false)
       let project: Project | undefined
-      let hydrationSource: "URL" | "last active" | "most recent" | "recovery" =
-        projectId ? "URL" : fallbackProjectId ? "last active" : "most recent"
+      let hydrationSource: "URL" | "recovery" = "URL"
 
       try {
-        if (requestedProjectId) {
-          const loaded = await db.getProjectForHydration(requestedProjectId)
-          project = loaded?.project
-          if (loaded?.source === "recovery") hydrationSource = "recovery"
-        } else {
-          project = await db.getMostRecentProject()
-        }
+        const loaded = await db.getProjectForHydration(projectId)
+        project = loaded?.project
+        if (loaded?.source === "recovery") hydrationSource = "recovery"
       } catch (error) {
         if (!cancelled && hydrationEpoch === projectEpochRef.current) {
           appendPersistenceDebugNote(
@@ -574,13 +563,8 @@ function MapKitTestPage() {
           hydrationEpoch === projectEpochRef.current
         ) {
           appendPersistenceDebugNote(
-            requestedProjectId
-              ? `IndexedDB HYDRATION FAILED • Project ${requestedProjectId.slice(-8)} was not found`
-              : "IndexedDB HYDRATION FAILED • No saved project was found",
+            `IndexedDB HYDRATION FAILED • Project ${projectId.slice(-8)} was not found`,
           )
-          if (!projectId) {
-            window.localStorage.removeItem(LAST_ACTIVE_PROJECT_ID_KEY)
-          }
         }
         if (!cancelled && hydrationEpoch === projectEpochRef.current) {
           isProjectHydratingRef.current = false
@@ -589,7 +573,6 @@ function MapKitTestPage() {
         return
       }
       const measurementState = fromProjectMeasurementData(project)
-      window.localStorage.setItem(LAST_ACTIVE_PROJECT_ID_KEY, project.id)
       if (
         measurementState.segments.length > 0 ||
         measurementState.pendingLineStart
@@ -598,12 +581,9 @@ function MapKitTestPage() {
           `IndexedDB HYDRATED • ${project.name} (${project.id.slice(-8)}) • ${measurementState.segments.length} segment(s), open endpoint ${measurementState.pendingLineStart ? "yes" : "no"}`,
         )
       }
-      if (!projectId) {
-        appendPersistenceDebugNote(
-          `IndexedDB ACTIVE PROJECT RESTORED • ${project.name} (${project.id.slice(-8)}) • ${hydrationSource}`,
-        )
-        router.replace(`/?projectId=${project.id}`)
-      }
+      appendPersistenceDebugNote(
+        `IndexedDB ACTIVE PROJECT OPENED • ${project.name} (${project.id.slice(-8)}) • ${hydrationSource}`,
+      )
       const persistedMapCamera = isUsableMapCamera(project.mapCamera)
         ? project.mapCamera
         : null
@@ -721,7 +701,7 @@ function MapKitTestPage() {
     return () => {
       cancelled = true
     }
-  }, [newProjectRequested, pathname, projectId, router])
+  }, [newProjectRequested, projectId])
 
   function dismissLocationAlert() {
     setIsLocationAlertDismissed(true)
@@ -1165,7 +1145,6 @@ function MapKitTestPage() {
 
       if (currentProjectIdRef.current !== savedProject.id) {
         currentProjectIdRef.current = savedProject.id
-        window.localStorage.setItem(LAST_ACTIVE_PROJECT_ID_KEY, savedProject.id)
         setCurrentProjectId(savedProject.id)
         router.replace(`/?projectId=${savedProject.id}`)
       }

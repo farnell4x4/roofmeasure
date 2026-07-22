@@ -3,15 +3,22 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { db } from "@/lib/persistence/db"
-import { calculateProjectTotals } from "@/lib/measurement/calculations"
 import { formatArea, formatLength } from "@/lib/measurement/units"
 import {
   buildReportPdfFingerprint,
   createCachedReportPdf,
-  REPORT_LINE_TYPES,
   reportTimestamp,
 } from "@/lib/report/pdf"
-import type { Project } from "@/types/models"
+import {
+  calculateReportTotals,
+  isImageProject,
+  reportDisplayDecimalFeet,
+  reportLineLengths,
+  reportLineTypes,
+  reportProjectLabel,
+  reportUnitSystem,
+  type ReportProject,
+} from "@/lib/report/model"
 
 type ReportPdfState =
   | { status: "preparing" }
@@ -44,7 +51,7 @@ function downloadFile(file: File) {
 export function ReportScreen() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [project, setProject] = useState<Project | null>(null)
+  const [project, setProject] = useState<ReportProject | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [generatedAt] = useState(() => new Date().toISOString())
   const [pdfState, setPdfState] = useState<ReportPdfState>({ status: "preparing" })
@@ -63,11 +70,14 @@ export function ReportScreen() {
   useEffect(() => {
     let cancelled = false
     const projectId = searchParams.get("projectId")
+    const isImageReport = searchParams.get("projectType") === "image"
 
     void (async () => {
-      const nextProject = projectId
-        ? await db.getProject(projectId)
-        : await db.getMostRecentProject()
+      const nextProject = projectId && isImageReport
+        ? await db.getImageProject(projectId)
+        : projectId
+          ? await db.getProject(projectId)
+          : await db.getMostRecentProject()
       if (cancelled) return
       setProject(nextProject ?? null)
       setIsLoading(false)
@@ -79,7 +89,7 @@ export function ReportScreen() {
   }, [searchParams])
 
   const totals = useMemo(
-    () => (project ? calculateProjectTotals(project) : null),
+    () => (project ? calculateReportTotals(project) : null),
     [project],
   )
 
@@ -137,7 +147,7 @@ export function ReportScreen() {
 
     try {
       await navigator.share({
-        title: `Roof report - ${project.location?.formattedAddress ?? project.name}`,
+        title: `Roof report - ${reportProjectLabel(project)}`,
         files: [pdfState.file],
       })
     } catch (error) {
@@ -156,13 +166,17 @@ export function ReportScreen() {
         <section className="report-card report-section">
           <h1>Report unavailable</h1>
           <p>That saved project could not be found on this device.</p>
-          <button className="no-print report-button report-button--dark" type="button" onClick={() => router.push("/")}>Back to map</button>
+          <button className="no-print report-button report-button--dark" type="button" onClick={() => router.push("/projects")}>Back to projects</button>
         </section>
       </main>
     )
   }
 
-  const projectLabel = project.location?.formattedAddress ?? project.name
+  const imageProject = isImageProject(project)
+  const projectLabel = reportProjectLabel(project)
+  const unitSystem = reportUnitSystem(project)
+  const displayDecimalFeet = reportDisplayDecimalFeet(project)
+  const lineTypes = reportLineTypes(project, totals)
 
   return (
     <main className="report-page">
@@ -172,7 +186,7 @@ export function ReportScreen() {
       <div className="report-content">
         <header className="report-header report-section">
           <div>
-            <p className="report-eyebrow">RoofTapeMeasure.com</p>
+            <p className="report-eyebrow">RoofTapeMeasure.com{imageProject ? " · Image project" : ""}</p>
             <h1>Roof Tape Measure Report</h1>
             <p>{projectLabel}</p>
           </div>
@@ -185,7 +199,7 @@ export function ReportScreen() {
         <section className="report-summary report-section">
           <div>
             <span>Total roofing area</span>
-            <strong>{formatArea(totals.totalSlopeAreaSqFt, project.preferences.unitSystem)}</strong>
+            <strong>{formatArea(totals.totalSlopeAreaSqFt, unitSystem)}</strong>
           </div>
           <div>
             <span>Roofing squares</span>
@@ -193,7 +207,7 @@ export function ReportScreen() {
           </div>
           <div>
             <span>Total linear footage</span>
-            <strong>{formatLength(totals.totalMeasuredLength, project.preferences.unitSystem, project.preferences.displayDecimalFeet)}</strong>
+            <strong>{formatLength(totals.totalMeasuredLength, unitSystem, displayDecimalFeet)}</strong>
           </div>
         </section>
 
@@ -212,19 +226,20 @@ export function ReportScreen() {
                 </tr>
               </thead>
               <tbody>
-                {REPORT_LINE_TYPES.map(({ type, label }) => (
-                  <tr key={type}>
+                {lineTypes.map(({ type, label }) => {
+                  const lengths = reportLineLengths(totals, type)
+                  return <tr key={type}>
                     <td>{label}</td>
-                    <td>{formatLength(totals.totals[type], project.preferences.unitSystem, project.preferences.displayDecimalFeet)}</td>
-                    <td>{formatLength(totals.slopeAdjustedTotals[type], project.preferences.unitSystem, project.preferences.displayDecimalFeet)}</td>
+                    <td>{formatLength(lengths.measured, unitSystem, displayDecimalFeet)}</td>
+                    <td>{formatLength(lengths.slopeAdjusted, unitSystem, displayDecimalFeet)}</td>
                   </tr>
-                ))}
+                })}
               </tbody>
               <tfoot>
                 <tr>
                   <th>Total</th>
-                  <th>{formatLength(totals.totalMeasuredLength, project.preferences.unitSystem, project.preferences.displayDecimalFeet)}</th>
-                  <th>{formatLength(totals.totalSlopeAdjustedLength, project.preferences.unitSystem, project.preferences.displayDecimalFeet)}</th>
+                  <th>{formatLength(totals.totalMeasuredLength, unitSystem, displayDecimalFeet)}</th>
+                  <th>{formatLength(totals.totalSlopeAdjustedLength, unitSystem, displayDecimalFeet)}</th>
                 </tr>
               </tfoot>
             </table>
@@ -233,11 +248,11 @@ export function ReportScreen() {
 
         <footer className="report-footer report-section">
           <p>Report generously provided by RoofTapeMeasure.com — Double check for accuracy.</p>
-          <p>{project.location?.formattedAddress ?? project.name}</p>
+          <p>{projectLabel}</p>
         </footer>
 
         <div className="report-actions no-print">
-          <button className="report-button report-button--quiet" type="button" onClick={() => router.push(`/?projectId=${project.id}`)}>Back to map</button>
+          <button className="report-button report-button--quiet" type="button" onClick={() => router.push(imageProject ? `/image?projectId=${project.id}` : `/?projectId=${project.id}`)}>{imageProject ? "Back to image" : "Back to map"}</button>
           {canShareReport ? <button className="report-button report-button--quiet" type="button" onClick={() => void shareReport()}>Share report</button> : null}
           <button className="report-button report-button--quiet" type="button" disabled={pdfState.status !== "ready"} onClick={() => pdfState.status === "ready" && downloadFile(pdfState.file)}>{pdfState.status === "preparing" ? "Preparing PDF..." : "Download PDF"}</button>
           <button className="report-button report-button--dark" type="button" onClick={printReport}>Print</button>
