@@ -12,6 +12,22 @@ export type GeographicPoint = {
   lng: number;
 };
 
+export type EditableMeasurementPoint = {
+  latitude: number;
+  longitude: number;
+};
+
+export type EditableMeasurementSegment = {
+  id: string;
+  start: EditableMeasurementPoint;
+  end: EditableMeasurementPoint;
+};
+
+export type SavedMeasurementGeometry = {
+  segments: EditableMeasurementSegment[];
+  pendingLineStart: EditableMeasurementPoint | null;
+};
+
 export type MeasurementSegment = {
   id: string;
   type: MeasurementType;
@@ -73,6 +89,7 @@ export type Project = {
   name: string;
   location?: PropertyLocation;
   mapCamera?: MapCameraState;
+  measurementGeometry?: SavedMeasurementGeometry;
   points: GeographicPoint[];
   segments: MeasurementSegment[];
   groups: MeasurementGroup[];

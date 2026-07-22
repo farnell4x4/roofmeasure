@@ -1,7 +1,7 @@
 "use client";
 
 import { MapPin, Search } from "lucide-react";
-import { FormEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   loadMapKit,
@@ -9,23 +9,48 @@ import {
   searchAddressSuggestions,
   searchBestAddressMatch
 } from "@/lib/mapkit/client";
+import {
+  fromProjectMeasurementData,
+  measurementPointKey,
+  toProjectMeasurementData
+} from "@/lib/measurement/project-geometry";
 import { db } from "@/lib/persistence/db";
 import { createEmptyProject } from "@/lib/projects/project-factory";
 import { haversineDistanceFeet } from "@/lib/measurement/geometry";
 import { AddressSuggestion } from "@/types/mapkit";
-import { Project, PropertyLocation } from "@/types/models";
+import { EditableMeasurementPoint as MeasurementPoint, EditableMeasurementSegment as MeasurementSegment, PropertyLocation } from "@/types/models";
 
 type LocationPermission = PermissionState | "unsupported";
 const LOCATION_ALERT_DISMISSED_KEY = "roofmeasure.mapkit-test.location-alert-dismissed";
 const SEARCH_MAX_ZOOM_SPAN = 0.00005;
-type MeasurementPoint = { latitude: number; longitude: number };
-type MeasurementSegment = { id: string; start: MeasurementPoint; end: MeasurementPoint };
 type DecisionAnchor = { x: number; y: number };
+type PointActionMenuState = {
+  point: MeasurementPoint;
+  anchor: DecisionAnchor;
+};
 type ProjectedMeasurementPoint = MeasurementPoint & {
   key: string;
   x: number;
   y: number;
   tone: "solid" | "pending";
+};
+type ProjectedMeasurementOverlay = {
+  segments: Array<{
+    id: string;
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+    labelX: number;
+    labelY: number;
+    label: string;
+  }>;
+  points: ProjectedMeasurementPoint[];
+};
+
+const EMPTY_PROJECTED_MEASUREMENT_OVERLAY: ProjectedMeasurementOverlay = {
+  segments: [],
+  points: []
 };
 
 function toProjectLocation(address: Pick<AddressSuggestion, "title" | "subtitle" | "formattedAddress" | "latitude" | "longitude">): PropertyLocation {
@@ -33,88 +58,6 @@ function toProjectLocation(address: Pick<AddressSuggestion, "title" | "subtitle"
     formattedAddress: address.formattedAddress || [address.title, address.subtitle].filter(Boolean).join(", "),
     latitude: address.latitude ?? 0,
     longitude: address.longitude ?? 0
-  };
-}
-
-function toProjectMeasurementData(measurementSegments: MeasurementSegment[], pendingLineStart?: MeasurementPoint | null) {
-  const now = new Date().toISOString();
-  const points = new Map<string, { id: string; lat: number; lng: number }>();
-
-  function ensurePoint(point: MeasurementPoint) {
-    const key = `${point.latitude.toFixed(7)}:${point.longitude.toFixed(7)}`;
-    if (!points.has(key)) {
-      points.set(key, {
-        id: key,
-        lat: point.latitude,
-        lng: point.longitude
-      });
-    }
-    return points.get(key)!;
-  }
-
-  if (pendingLineStart) {
-    ensurePoint(pendingLineStart);
-  }
-
-  const segments = measurementSegments.map((segment) => {
-    const startPoint = ensurePoint(segment.start);
-    const endPoint = ensurePoint(segment.end);
-    return {
-      id: segment.id,
-      type: "eave" as const,
-      startPointId: startPoint.id,
-      endPointId: endPoint.id,
-      lengthFeet: haversineDistanceFeet(
-        { lat: segment.start.latitude, lng: segment.start.longitude },
-        { lat: segment.end.latitude, lng: segment.end.longitude }
-      ),
-      groupId: "mapkit-test",
-      createdAt: now,
-      updatedAt: now
-    };
-  });
-
-  return {
-    points: Array.from(points.values()),
-    segments
-  };
-}
-
-function fromProjectMeasurementData(project: Project) {
-  const pointsById = new Map(project.points.map((point) => [point.id, point]));
-  const usedPointIds = new Set<string>();
-
-  const segments = project.segments
-    .map((segment) => {
-      const startPoint = pointsById.get(segment.startPointId);
-      const endPoint = pointsById.get(segment.endPointId);
-      if (!startPoint || !endPoint) return null;
-      usedPointIds.add(segment.startPointId);
-      usedPointIds.add(segment.endPointId);
-      return {
-        id: segment.id,
-        start: {
-          latitude: startPoint.lat,
-          longitude: startPoint.lng
-        },
-        end: {
-          latitude: endPoint.lat,
-          longitude: endPoint.lng
-        }
-      };
-    })
-    .filter((segment): segment is MeasurementSegment => Boolean(segment));
-
-  const orphanPoint = project.points.find((point) => !usedPointIds.has(point.id));
-
-  return {
-    segments,
-    pendingLineStart: orphanPoint
-      ? {
-          latitude: orphanPoint.lat,
-          longitude: orphanPoint.lng
-        }
-      : null
   };
 }
 
@@ -150,6 +93,8 @@ export default function MapKitTestPage() {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<InstanceType<NonNullable<NonNullable<Window["mapkit"]>["Map"]>> | null>(null);
   const currentProjectIdRef = useRef<string | null>(null);
+  const saveQueueRef = useRef(Promise.resolve<void>(undefined));
+  const projectionRefreshFrameRef = useRef<number | null>(null);
   const superZoomDragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -198,11 +143,15 @@ export default function MapKitTestPage() {
   const [pendingLineStart, setPendingLineStart] = useState<MeasurementPoint | null>(null);
   const [pendingModeDecisionPoint, setPendingModeDecisionPoint] = useState<MeasurementPoint | null>(null);
   const [pendingModeDecisionAnchor, setPendingModeDecisionAnchor] = useState<DecisionAnchor | null>(null);
+  const [pointActionMenu, setPointActionMenu] = useState<PointActionMenuState | null>(null);
   const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] = useState(false);
   const [superZoomScale, setSuperZoomScale] = useState(1);
   const [superZoomOffsetX, setSuperZoomOffsetX] = useState(0);
   const [superZoomOffsetY, setSuperZoomOffsetY] = useState(0);
   const [projectionRevision, setProjectionRevision] = useState(0);
+  const [projectedMeasurementOverlay, setProjectedMeasurementOverlay] = useState<ProjectedMeasurementOverlay>(
+    EMPTY_PROJECTED_MEASUREMENT_OVERLAY
+  );
   const [locationState, setLocationState] = useState<
     "idle" | "requesting" | "granted" | "denied" | "unsupported" | "error" | "prompt"
   >("idle");
@@ -239,6 +188,7 @@ export default function MapKitTestPage() {
         setPendingLineStart(null);
         setPendingModeDecisionPoint(null);
         setPendingModeDecisionAnchor(null);
+        setPointActionMenu(null);
         setSuppressSuggestionsUntilTyping(false);
         resetSuperZoom();
         setProjectHydrated(true);
@@ -258,6 +208,7 @@ export default function MapKitTestPage() {
       setPendingLineStart(measurementState.pendingLineStart);
       setPendingModeDecisionPoint(null);
       setPendingModeDecisionAnchor(null);
+      setPointActionMenu(null);
       resetSuperZoom();
       setSelectedPlace(
         project.location
@@ -296,7 +247,22 @@ export default function MapKitTestPage() {
     setPendingLineStart(null);
     setPendingModeDecisionPoint(null);
     setPendingModeDecisionAnchor(null);
+    setPointActionMenu(null);
     setIsMeasurementSettingsOpen(false);
+  }
+
+  function scheduleProjectionRefresh() {
+    if (typeof window === "undefined") return;
+    if (projectionRefreshFrameRef.current !== null) {
+      window.cancelAnimationFrame(projectionRefreshFrameRef.current);
+    }
+
+    projectionRefreshFrameRef.current = window.requestAnimationFrame(() => {
+      projectionRefreshFrameRef.current = window.requestAnimationFrame(() => {
+        projectionRefreshFrameRef.current = null;
+        setProjectionRevision((current) => current + 1);
+      });
+    });
   }
 
   function clampSuperZoomOffsets(scale: number, offsetX: number, offsetY: number) {
@@ -365,53 +331,63 @@ export default function MapKitTestPage() {
     measurementSegments?: MeasurementSegment[];
     pendingLineStart?: MeasurementPoint | null;
   }) {
-    const geometry = toProjectMeasurementData(
-      options?.measurementSegments ?? measurementSegments,
-      options?.pendingLineStart ?? pendingLineStart
-    );
-    const existingProject =
-      currentProjectIdRef.current ? await db.getProject(currentProjectIdRef.current) : undefined;
-    const projectName =
-      options?.projectName ??
-      existingProject?.name ??
-      (query.trim() || options?.location?.formattedAddress || "Untitled Project");
-    const baseProject = existingProject ?? createEmptyProject(projectName);
-    const savedProject = await db.saveProject({
-      ...baseProject,
-      name: projectName,
-      location: options?.location === undefined ? baseProject.location : options.location ?? undefined,
-      points: geometry.points,
-      segments: geometry.segments,
-      groups: [],
-      planes: [],
-      lastOpenedAt: new Date().toISOString()
-    });
+    const snapshotSegments = options?.measurementSegments ?? measurementSegments;
+    const snapshotPendingLineStart = options?.pendingLineStart ?? pendingLineStart;
+    const snapshotQuery = query.trim();
+    const snapshotLocation = options?.location;
+    const snapshotProjectName = options?.projectName;
 
-    if (currentProjectIdRef.current !== savedProject.id) {
-      currentProjectIdRef.current = savedProject.id;
-      setCurrentProjectId(savedProject.id);
-      router.replace(`/?projectId=${savedProject.id}`);
-    }
+    const persistSnapshot = async () => {
+      const geometry = toProjectMeasurementData(snapshotSegments, snapshotPendingLineStart);
+      const existingProject =
+        currentProjectIdRef.current ? await db.getProject(currentProjectIdRef.current) : undefined;
+      const projectName =
+        snapshotProjectName ??
+        existingProject?.name ??
+        (snapshotQuery || snapshotLocation?.formattedAddress || "Untitled Project");
+      const baseProject = existingProject ?? createEmptyProject(projectName);
+      const savedProject = await db.saveProject({
+        ...baseProject,
+        name: projectName,
+        location: snapshotLocation === undefined ? baseProject.location : snapshotLocation ?? undefined,
+        measurementGeometry: geometry.measurementGeometry,
+        points: geometry.points,
+        segments: geometry.segments,
+        groups: [],
+        planes: [],
+        lastOpenedAt: new Date().toISOString()
+      });
 
-    return savedProject;
-  }
+      if (currentProjectIdRef.current !== savedProject.id) {
+        currentProjectIdRef.current = savedProject.id;
+        setCurrentProjectId(savedProject.id);
+        router.replace(`/?projectId=${savedProject.id}`);
+      }
 
-  function pointKey(point: MeasurementPoint) {
-    return `${point.latitude.toFixed(7)}:${point.longitude.toFixed(7)}`;
+      return savedProject;
+    };
+
+    const queuedSave = saveQueueRef.current.then(persistSnapshot, persistSnapshot);
+    saveQueueRef.current = queuedSave.then(() => undefined, () => undefined);
+    return queuedSave;
   }
 
   function updateMeasurementPointsMatching(sourcePoint: MeasurementPoint, nextPoint: MeasurementPoint) {
-    const sourceKey = pointKey(sourcePoint);
+    const sourceKey = measurementPointKey(sourcePoint);
 
     setMeasurementSegments((currentSegments) =>
       currentSegments.map((segment) => ({
         ...segment,
-        start: pointKey(segment.start) === sourceKey ? nextPoint : segment.start,
-        end: pointKey(segment.end) === sourceKey ? nextPoint : segment.end
+        start: measurementPointKey(segment.start) === sourceKey ? nextPoint : segment.start,
+        end: measurementPointKey(segment.end) === sourceKey ? nextPoint : segment.end
       }))
     );
-    setPendingLineStart((currentPoint) => (currentPoint && pointKey(currentPoint) === sourceKey ? nextPoint : currentPoint));
-    setPendingModeDecisionPoint((currentPoint) => (currentPoint && pointKey(currentPoint) === sourceKey ? nextPoint : currentPoint));
+    setPendingLineStart((currentPoint) =>
+      currentPoint && measurementPointKey(currentPoint) === sourceKey ? nextPoint : currentPoint
+    );
+    setPendingModeDecisionPoint((currentPoint) =>
+      currentPoint && measurementPointKey(currentPoint) === sourceKey ? nextPoint : currentPoint
+    );
   }
 
   function getViewportAnchorFromPagePoint(pointOnPage: DOMPoint): DecisionAnchor | null {
@@ -432,6 +408,8 @@ export default function MapKitTestPage() {
   }
 
   function handleTappedCoordinate(tappedPoint: MeasurementPoint, anchor: DecisionAnchor | null) {
+    setPointActionMenu(null);
+
     if (!pendingLineStart) {
       setPendingLineStart(tappedPoint);
       setPendingModeDecisionPoint(null);
@@ -458,6 +436,7 @@ export default function MapKitTestPage() {
     const decisionPoint = pendingModeDecisionPoint;
     setPendingModeDecisionPoint(null);
     setPendingModeDecisionAnchor(null);
+    setPointActionMenu(null);
     setIsMeasurementSettingsOpen(false);
 
     if (!decisionPoint) return;
@@ -503,40 +482,55 @@ export default function MapKitTestPage() {
     clearMeasurementVisuals();
   }
 
-  const projectedMeasurementOverlay = useMemo(() => {
+  function openPointActionMenu(point: ProjectedMeasurementPoint) {
+    setPendingModeDecisionPoint(null);
+    setPendingModeDecisionAnchor(null);
+    setPointActionMenu({
+      point: {
+        latitude: point.latitude,
+        longitude: point.longitude
+      },
+      anchor: {
+        x: projectSuperZoomX(point.x),
+        y: projectSuperZoomY(point.y)
+      }
+    });
+  }
+
+  function handleTieInPoint(point: MeasurementPoint) {
+    setPendingModeDecisionPoint(null);
+    setPendingModeDecisionAnchor(null);
+    setPendingLineStart(point);
+    setPointActionMenu(null);
+  }
+
+  function handleDeletePoint(point: MeasurementPoint) {
+    const targetKey = measurementPointKey(point);
+    setMeasurementSegments((currentSegments) =>
+      currentSegments.filter(
+        (segment) =>
+          measurementPointKey(segment.start) !== targetKey && measurementPointKey(segment.end) !== targetKey
+      )
+    );
+    setPendingLineStart((currentPoint) =>
+      currentPoint && measurementPointKey(currentPoint) === targetKey ? null : currentPoint
+    );
+    setPendingModeDecisionPoint((currentPoint) =>
+      currentPoint && measurementPointKey(currentPoint) === targetKey ? null : currentPoint
+    );
+    setPointActionMenu(null);
+  }
+
+  function buildProjectedMeasurementOverlay(): ProjectedMeasurementOverlay {
     if (typeof window === "undefined") {
-      return {
-        segments: [] as Array<{
-          id: string;
-          startX: number;
-          startY: number;
-          endX: number;
-          endY: number;
-          labelX: number;
-          labelY: number;
-          label: string;
-        }>,
-        points: [] as ProjectedMeasurementPoint[]
-      };
+      return EMPTY_PROJECTED_MEASUREMENT_OVERLAY;
     }
 
     const mapkit = window.mapkit;
     const map = mapInstanceRef.current;
     const bounds = mapViewportRef.current?.getBoundingClientRect();
     if (!mapkit || !map || !bounds) {
-      return {
-        segments: [] as Array<{
-          id: string;
-          startX: number;
-          startY: number;
-          endX: number;
-          endY: number;
-          labelX: number;
-          labelY: number;
-          label: string;
-        }>,
-        points: [] as ProjectedMeasurementPoint[]
-      };
+      return EMPTY_PROJECTED_MEASUREMENT_OVERLAY;
     }
 
     const coordinateCtor = mapkit.Coordinate;
@@ -557,8 +551,8 @@ export default function MapKitTestPage() {
       const length = Math.hypot(dx, dy) || 1;
       const offsetX = (-dy / length) * 34;
       const offsetY = (dx / length) * 34;
-      const startKey = pointKey(segment.start);
-      const endKey = pointKey(segment.end);
+      const startKey = measurementPointKey(segment.start);
+      const endKey = measurementPointKey(segment.end);
 
       if (!points.has(startKey)) {
         points.set(startKey, {
@@ -601,9 +595,9 @@ export default function MapKitTestPage() {
       const pendingPagePoint = map.convertCoordinateToPointOnPage(
         new coordinateCtor(pendingLineStart.latitude, pendingLineStart.longitude)
       );
-      points.set(pointKey(pendingLineStart), {
+      points.set(measurementPointKey(pendingLineStart), {
         ...pendingLineStart,
-        key: pointKey(pendingLineStart),
+        key: measurementPointKey(pendingLineStart),
         x: pendingPagePoint.x - bounds.left,
         y: pendingPagePoint.y - bounds.top,
         tone: "pending"
@@ -614,7 +608,41 @@ export default function MapKitTestPage() {
       segments,
       points: Array.from(points.values())
     };
-  }, [measurementSegments, pendingLineStart, projectionRevision]);
+  }
+
+  useEffect(() => {
+    if (!mapReady) {
+      setProjectedMeasurementOverlay(EMPTY_PROJECTED_MEASUREMENT_OVERLAY);
+      return;
+    }
+
+    if (typeof window === "undefined") return;
+
+    let cancelled = false;
+    let frameA = 0;
+    let frameB = 0;
+
+    frameA = window.requestAnimationFrame(() => {
+      frameB = window.requestAnimationFrame(() => {
+        if (cancelled) return;
+        setProjectedMeasurementOverlay(buildProjectedMeasurementOverlay());
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameA);
+      window.cancelAnimationFrame(frameB);
+    };
+  }, [
+    mapReady,
+    projectHydrated,
+    measurementSegments,
+    pendingLineStart,
+    projectionRevision,
+    selectedPlace,
+    currentProjectId
+  ]);
 
   function syncSelectedPlaceAnnotation(place: { latitude: number; longitude: number } | null) {
     const mapkit = window.mapkit;
@@ -753,6 +781,10 @@ export default function MapKitTestPage() {
 
     return () => {
       cancelled = true;
+      if (typeof window !== "undefined" && projectionRefreshFrameRef.current !== null) {
+        window.cancelAnimationFrame(projectionRefreshFrameRef.current);
+        projectionRefreshFrameRef.current = null;
+      }
       setMapReady(false);
       clearMeasurementVisuals();
       selectedPlaceAnnotationRef.current = null;
@@ -785,6 +817,12 @@ export default function MapKitTestPage() {
       resizeObserver.disconnect();
     };
   }, [mapReady]);
+
+  useEffect(() => {
+    if (!mapReady || !projectHydrated) return;
+    if (measurementSegments.length === 0 && !pendingLineStart) return;
+    scheduleProjectionRefresh();
+  }, [mapReady, projectHydrated, measurementSegments, pendingLineStart]);
 
   useEffect(() => {
     let permissionStatus: PermissionStatus | null = null;
@@ -1644,6 +1682,59 @@ export default function MapKitTestPage() {
           </button>
         </div>
       ) : null}
+      {pointActionMenu ? (
+        <div
+          style={{
+            position: "absolute",
+            left:
+              pointActionMenu.anchor.x > window.innerWidth - 176
+                ? pointActionMenu.anchor.x - 156
+                : pointActionMenu.anchor.x + 20,
+            top: Math.min(
+              Math.max(pointActionMenu.anchor.y - 44, 12),
+              window.innerHeight - 108
+            ),
+            zIndex: 3,
+            display: "grid",
+            gap: 8,
+            width: 136,
+            padding: 12,
+            borderRadius: 16,
+            background: "rgba(255, 255, 255, 0.97)",
+            border: "1px solid rgba(31, 37, 34, 0.12)",
+            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => handleTieInPoint(pointActionMenu.point)}
+            style={{
+              border: 0,
+              borderRadius: 12,
+              padding: "10px 12px",
+              background: "#1f2522",
+              color: "#fff",
+              cursor: "pointer"
+            }}
+          >
+            Tie in
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDeletePoint(pointActionMenu.point)}
+            style={{
+              border: 0,
+              borderRadius: 12,
+              padding: "10px 12px",
+              background: "rgba(31, 37, 34, 0.08)",
+              color: "#1f2522",
+              cursor: "pointer"
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      ) : null}
       <div
         ref={mapViewportRef}
         style={{
@@ -1670,94 +1761,95 @@ export default function MapKitTestPage() {
               zIndex: 0
             }}
           />
-        </div>
-        {(measurementSegments.length > 0 || pendingLineStart) ? (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              zIndex: 2,
-              pointerEvents: "none"
-            }}
-          >
-            <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, overflow: "visible" }}>
-              {projectedMeasurementOverlay.segments.map((segment) => (
-                <g key={segment.id}>
-                  <line
-                    x1={projectSuperZoomX(segment.startX)}
-                    y1={projectSuperZoomY(segment.startY)}
-                    x2={projectSuperZoomX(segment.endX)}
-                    y2={projectSuperZoomY(segment.endY)}
-                    stroke="#e0b93b"
-                    strokeWidth={3}
-                    strokeLinecap="round"
-                    strokeDasharray="6 6"
-                  />
-                  <g transform={`translate(${projectSuperZoomX(segment.labelX)} ${projectSuperZoomY(segment.labelY)})`}>
-                    <rect
-                      x={-24}
-                      y={-10}
-                      width={48}
-                      height={20}
-                      rx={10}
-                      fill="rgba(31, 37, 34, 0.82)"
+          {(measurementSegments.length > 0 || pendingLineStart) ? (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 2,
+                pointerEvents: "none"
+              }}
+            >
+              <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+                {projectedMeasurementOverlay.segments.map((segment) => (
+                  <g key={segment.id}>
+                    <line
+                      x1={segment.startX}
+                      y1={segment.startY}
+                      x2={segment.endX}
+                      y2={segment.endY}
+                      stroke="#e0b93b"
+                      strokeWidth={3}
+                      strokeLinecap="round"
+                      strokeDasharray="6 6"
                     />
-                    <text
-                      x={0}
-                      y={3.5}
-                      fill="#fff"
-                      textAnchor="middle"
-                      fontSize="10pt"
-                      fontWeight={700}
-                    >
-                      {segment.label}
-                    </text>
+                    <g transform={`translate(${segment.labelX} ${segment.labelY})`}>
+                      <rect
+                        x={-24}
+                        y={-10}
+                        width={48}
+                        height={20}
+                        rx={10}
+                        fill="rgba(31, 37, 34, 0.82)"
+                      />
+                      <text
+                        x={0}
+                        y={3.5}
+                        fill="#fff"
+                        textAnchor="middle"
+                        fontSize="10pt"
+                        fontWeight={700}
+                      >
+                        {segment.label}
+                      </text>
+                    </g>
                   </g>
-                </g>
-              ))}
-            </svg>
-            {projectedMeasurementOverlay.points.map((point) => (
-              <button
-                key={`${point.key}:${point.tone}`}
-                type="button"
-                onPointerDown={(event) => handleMeasurementPointPointerDown(event, point)}
-                onPointerMove={handleMeasurementPointPointerMove}
-                onPointerUp={handleMeasurementPointPointerUp}
-                onPointerCancel={handleMeasurementPointPointerCancel}
-                style={{
-                  position: "absolute",
-                  left: projectSuperZoomX(point.x),
-                  top: projectSuperZoomY(point.y),
-                  width: 28,
-                  height: 28,
-                  transform: "translate(-50%, -50%)",
-                  borderRadius: 999,
-                  border: 0,
-                  background: "transparent",
-                  padding: 0,
-                  cursor: "grab",
-                  pointerEvents: "auto",
-                  touchAction: "none",
-                  display: "grid",
-                  placeItems: "center"
-                }}
-                aria-label="Move measurement point"
-              >
-                <span
+                ))}
+              </svg>
+              {projectedMeasurementOverlay.points.map((point) => (
+                <button
+                  key={`${point.key}:${point.tone}`}
+                  type="button"
+                  onPointerDown={(event) => handleMeasurementPointPointerDown(event, point)}
+                  onPointerMove={handleMeasurementPointPointerMove}
+                  onPointerUp={handleMeasurementPointPointerUp}
+                  onPointerCancel={handleMeasurementPointPointerCancel}
+                  onClick={() => openPointActionMenu(point)}
                   style={{
-                    display: "block",
-                    width: 10,
-                    height: 10,
+                    position: "absolute",
+                    left: point.x,
+                    top: point.y,
+                    width: 28,
+                    height: 28,
+                    transform: "translate(-50%, -50%)",
                     borderRadius: 999,
-                    border: point.tone === "pending" ? "2px solid #1f2522" : "2px solid rgba(255,255,255,0.95)",
-                    background: point.tone === "pending" ? "#ffffff" : "#1f2522",
-                    boxShadow: "0 6px 18px rgba(20, 24, 22, 0.22)"
+                    border: 0,
+                    background: "transparent",
+                    padding: 0,
+                    cursor: "grab",
+                    pointerEvents: "auto",
+                    touchAction: "none",
+                    display: "grid",
+                    placeItems: "center"
                   }}
-                />
-              </button>
-            ))}
-          </div>
-        ) : null}
+                  aria-label="Move measurement point"
+                >
+                  <span
+                    style={{
+                      display: "block",
+                      width: 10,
+                      height: 10,
+                      borderRadius: 999,
+                      border: point.tone === "pending" ? "2px solid #1f2522" : "2px solid rgba(255,255,255,0.95)",
+                      background: point.tone === "pending" ? "#ffffff" : "#1f2522",
+                      boxShadow: "0 6px 18px rgba(20, 24, 22, 0.22)"
+                    }}
+                  />
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
         {superZoomActive ? (
           <div
             onPointerDown={handleSuperZoomPointerDown}
