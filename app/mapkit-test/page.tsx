@@ -81,9 +81,34 @@ type ProjectedMeasurementOverlay = {
     startY: number
     endX: number
     endY: number
+    lengthFeet: number
     label: string
   }>
   points: ProjectedMeasurementPoint[]
+}
+
+function polygonLabelCenter(points: Array<{ x: number; y: number }>) {
+  let twiceArea = 0
+  let x = 0
+  let y = 0
+
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index]
+    const next = points[(index + 1) % points.length]
+    const cross = current.x * next.y - next.x * current.y
+    twiceArea += cross
+    x += (current.x + next.x) * cross
+    y += (current.y + next.y) * cross
+  }
+
+  if (Math.abs(twiceArea) < 0.001) {
+    return {
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    }
+  }
+
+  return { x: x / (3 * twiceArea), y: y / (3 * twiceArea) }
 }
 
 type MeasurementGeometryState = {
@@ -1436,18 +1461,19 @@ function MapKitTestPage() {
         })
       }
 
+      const lengthFeet = haversineDistanceFeet(
+        { lat: segment.start.latitude, lng: segment.start.longitude },
+        { lat: segment.end.latitude, lng: segment.end.longitude },
+      )
+
       return {
         id: segment.id,
         startX,
         startY,
         endX,
         endY,
-        label: `${Math.round(
-          haversineDistanceFeet(
-            { lat: segment.start.latitude, lng: segment.start.longitude },
-            { lat: segment.end.latitude, lng: segment.end.longitude },
-          ),
-        )}'`,
+        lengthFeet,
+        label: `${Math.round(lengthFeet)}'`,
       }
     })
 
@@ -2965,26 +2991,49 @@ function MapKitTestPage() {
               height="100%"
               style={{ position: "absolute", inset: 0, overflow: "visible" }}
             >
-              {projectedRoofPlanes.map((plane) => (
-                <polygon
-                  key={plane.id}
-                  points={plane.points
-                    .map((point) => {
-                      const visualPoint = baseViewportPointToVisualViewportPoint(
-                        { x: point.x, y: point.y },
-                        precisionZoom,
-                      )
-                      return `${visualPoint.x},${visualPoint.y}`
-                    })
-                    .join(" ")}
-                  fill="rgba(40, 128, 255, 0.5)"
-                  stroke="rgba(22, 91, 196, 0.9)"
-                  strokeWidth={2}
-                  strokeLinejoin="round"
-                  style={{ pointerEvents: "auto", cursor: "pointer" }}
-                  onClick={(event) => openPlanePitchMenu(event, plane)}
-                />
-              ))}
+              {projectedRoofPlanes.map((plane) => {
+                const visualPoints = plane.points.map((point) =>
+                  baseViewportPointToVisualViewportPoint(
+                    { x: point.x, y: point.y },
+                    precisionZoom,
+                  ),
+                )
+                const labelCenter = polygonLabelCenter(visualPoints)
+
+                return (
+                  <g key={plane.id}>
+                    <polygon
+                      points={visualPoints
+                        .map((point) => `${point.x},${point.y}`)
+                        .join(" ")}
+                      fill="rgba(40, 128, 255, 0.5)"
+                      stroke="rgba(22, 91, 196, 0.9)"
+                      strokeWidth={2}
+                      strokeLinejoin="round"
+                      style={{ pointerEvents: "auto", cursor: "pointer" }}
+                      onClick={(event) => openPlanePitchMenu(event, plane)}
+                    />
+                    {plane.pitch ? (
+                      <text
+                        x={labelCenter.x}
+                        y={labelCenter.y}
+                        fill="#fff"
+                        stroke="#000"
+                        strokeWidth={3}
+                        paintOrder="stroke"
+                        strokeLinejoin="round"
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={10}
+                        fontWeight={800}
+                        pointerEvents="none"
+                      >
+                        {plane.pitch.replace(/12$/, "")}
+                      </text>
+                    ) : null}
+                  </g>
+                )
+              })}
               {projectedMeasurementOverlay.segments.map((segment) => {
                 const start = baseViewportPointToVisualViewportPoint(
                   { x: segment.startX, y: segment.startY },
@@ -2997,8 +3046,11 @@ function MapKitTestPage() {
                 const dx = end.x - start.x
                 const dy = end.y - start.y
                 const length = Math.hypot(dx, dy) || 1
-                const labelX = (start.x + end.x) / 2 + (-dy / length) * 34
-                const labelY = (start.y + end.y) / 2 + (dx / length) * 34
+                const labelOffset = segment.lengthFeet > 6 ? 0 : 17
+                const labelX =
+                  (start.x + end.x) / 2 + (-dy / length) * labelOffset
+                const labelY =
+                  (start.y + end.y) / 2 + (dx / length) * labelOffset
 
                 return (
                   <g key={segment.id}>
@@ -3013,18 +3065,14 @@ function MapKitTestPage() {
                       strokeDasharray="6 6"
                     />
                     <g transform={`translate(${labelX} ${labelY})`}>
-                      <rect
-                        x={-24}
-                        y={-10}
-                        width={48}
-                        height={20}
-                        rx={10}
-                        fill="rgba(31, 37, 34, 0.82)"
-                      />
                       <text
                         x={0}
                         y={3.5}
-                        fill="#fff"
+                        fill="#ffff00"
+                        stroke="#000"
+                        strokeWidth={3}
+                        paintOrder="stroke"
+                        strokeLinejoin="round"
                         textAnchor="middle"
                         fontSize={10}
                         fontWeight={700}
