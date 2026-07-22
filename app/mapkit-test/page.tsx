@@ -10,12 +10,12 @@ import {
 } from "@/lib/mapkit/client";
 import { haversineDistanceFeet } from "@/lib/measurement/geometry";
 import { AddressSuggestion } from "@/types/mapkit";
-import { MeasureContinuationMode } from "@/types/models";
 
 type LocationPermission = PermissionState | "unsupported";
 const LOCATION_ALERT_DISMISSED_KEY = "roofmeasure.mapkit-test.location-alert-dismissed";
 type MeasurementPoint = { latitude: number; longitude: number };
 type MeasurementSegment = { id: string; start: MeasurementPoint; end: MeasurementPoint };
+type DecisionAnchor = { x: number; y: number };
 type ProjectedMeasurementPoint = MeasurementPoint & {
   key: string;
   x: number;
@@ -92,10 +92,10 @@ export default function MapKitTestPage() {
   } | null>(null);
   const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [measurementMode, setMeasurementMode] = useState<MeasureContinuationMode | null>(null);
   const [measurementSegments, setMeasurementSegments] = useState<MeasurementSegment[]>([]);
   const [pendingLineStart, setPendingLineStart] = useState<MeasurementPoint | null>(null);
   const [pendingModeDecisionPoint, setPendingModeDecisionPoint] = useState<MeasurementPoint | null>(null);
+  const [pendingModeDecisionAnchor, setPendingModeDecisionAnchor] = useState<DecisionAnchor | null>(null);
   const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] = useState(false);
   const [superZoomScale, setSuperZoomScale] = useState(1);
   const [superZoomOffsetX, setSuperZoomOffsetX] = useState(0);
@@ -107,6 +107,7 @@ export default function MapKitTestPage() {
   const [locationAlert, setLocationAlert] = useState("");
   const [isLocationAlertDismissed, setIsLocationAlertDismissed] = useState(false);
   const superZoomActive = superZoomScale > 1;
+  const inverseSuperZoomScale = 1 / superZoomScale;
 
   const safariLocationHelp =
     'In Safari, open Website Settings for this page and change Location to "Allow", then reload this page.';
@@ -135,10 +136,10 @@ export default function MapKitTestPage() {
   }
 
   function resetMeasurementSession() {
-    setMeasurementMode(null);
     setMeasurementSegments([]);
     setPendingLineStart(null);
     setPendingModeDecisionPoint(null);
+    setPendingModeDecisionAnchor(null);
     setIsMeasurementSettingsOpen(false);
   }
 
@@ -176,11 +177,6 @@ export default function MapKitTestPage() {
     setSuperZoomOffsetY(clampedOffsets.y);
   }
 
-  function getLastMeasuredEndpoint() {
-    const lastSegment = measurementSegments[measurementSegments.length - 1];
-    return lastSegment?.end ?? null;
-  }
-
   function appendMeasurementSegment(start: MeasurementPoint, end: MeasurementPoint) {
     setMeasurementSegments((currentSegments) => [
       ...currentSegments,
@@ -210,49 +206,28 @@ export default function MapKitTestPage() {
     setPendingModeDecisionPoint((currentPoint) => (currentPoint && pointKey(currentPoint) === sourceKey ? nextPoint : currentPoint));
   }
 
-  function handleTappedCoordinate(tappedPoint: MeasurementPoint) {
-    if (!measurementSegments.length) {
-      if (!pendingLineStart) {
-        setPendingLineStart(tappedPoint);
-        return;
-      }
-
-      appendMeasurementSegment(pendingLineStart, tappedPoint);
-      if (measurementMode === "continuous") {
-        setPendingLineStart(tappedPoint);
-      } else {
-        setPendingLineStart(null);
-      }
-      return;
-    }
-
-    if (measurementMode === null) {
-      setPendingModeDecisionPoint(tappedPoint);
-      return;
-    }
-
-    if (measurementMode === "continuous") {
-      const startPoint = pendingLineStart ?? getLastMeasuredEndpoint();
-      if (!startPoint) {
-        setPendingLineStart(tappedPoint);
-        return;
-      }
-
-      appendMeasurementSegment(startPoint, tappedPoint);
-      setPendingLineStart(tappedPoint);
-      return;
-    }
-
-    if (!pendingLineStart) {
-      setPendingLineStart(tappedPoint);
-      return;
-    }
-
-    appendMeasurementSegment(pendingLineStart, tappedPoint);
-    setPendingLineStart(null);
+  function getViewportAnchorFromPagePoint(pointOnPage: DOMPoint): DecisionAnchor | null {
+    const bounds = mapViewportRef.current?.getBoundingClientRect();
+    if (!bounds) return null;
+    return {
+      x: pointOnPage.x - bounds.left,
+      y: pointOnPage.y - bounds.top
+    };
   }
 
-  function handlePointOnPage(pointOnPage: DOMPoint) {
+  function handleTappedCoordinate(tappedPoint: MeasurementPoint, anchor: DecisionAnchor | null) {
+    if (!pendingLineStart) {
+      setPendingLineStart(tappedPoint);
+      setPendingModeDecisionPoint(null);
+      setPendingModeDecisionAnchor(null);
+      return;
+    }
+
+    setPendingModeDecisionPoint(tappedPoint);
+    setPendingModeDecisionAnchor(anchor);
+  }
+
+  function handlePointOnPage(pointOnPage: DOMPoint, anchor?: DecisionAnchor | null) {
     const map = mapInstanceRef.current;
     if (!map || pendingModeDecisionPoint) return;
 
@@ -260,21 +235,19 @@ export default function MapKitTestPage() {
     handleTappedCoordinate({
       latitude: coordinate.latitude ?? 0,
       longitude: coordinate.longitude ?? 0
-    });
+    }, anchor ?? getViewportAnchorFromPagePoint(pointOnPage));
   }
 
-  function applyMeasurementModeChoice(mode: MeasureContinuationMode) {
+  function applyMeasurementModeChoice(mode: "continue" | "start-new") {
     const decisionPoint = pendingModeDecisionPoint;
-    const lastEndpoint = getLastMeasuredEndpoint();
-
-    setMeasurementMode(mode);
     setPendingModeDecisionPoint(null);
+    setPendingModeDecisionAnchor(null);
     setIsMeasurementSettingsOpen(false);
 
     if (!decisionPoint) return;
 
-    if (mode === "continuous" && lastEndpoint) {
-      appendMeasurementSegment(lastEndpoint, decisionPoint);
+    if (mode === "continue" && pendingLineStart) {
+      appendMeasurementSegment(pendingLineStart, decisionPoint);
       setPendingLineStart(decisionPoint);
       return;
     }
@@ -900,7 +873,7 @@ export default function MapKitTestPage() {
     return () => {
       map.removeEventListener("single-tap", handleMapTap);
     };
-  }, [mapReady, pendingModeDecisionPoint, pendingLineStart, measurementMode, measurementSegments, superZoomActive]);
+  }, [mapReady, pendingModeDecisionPoint, pendingLineStart, measurementSegments, superZoomActive]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -1076,12 +1049,18 @@ export default function MapKitTestPage() {
 
     if (drag.dragging) return;
 
+    const originalPoint = getSuperZoomOriginalPagePoint(event.clientX, event.clientY);
+    if (!originalPoint) return;
     const bounds = mapViewportRef.current?.getBoundingClientRect();
-    if (!bounds) return;
-
-    const originalX = (event.clientX - bounds.left - superZoomOffsetX) / superZoomScale;
-    const originalY = (event.clientY - bounds.top - superZoomOffsetY) / superZoomScale;
-    handlePointOnPage(new DOMPoint(bounds.left + originalX, bounds.top + originalY));
+    handlePointOnPage(
+      originalPoint,
+      bounds
+        ? {
+            x: event.clientX - bounds.left,
+            y: event.clientY - bounds.top
+          }
+        : null
+    );
   }
 
   function handleSuperZoomPointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
@@ -1397,54 +1376,9 @@ export default function MapKitTestPage() {
               borderRadius: 16,
               background: "rgba(255, 255, 255, 0.96)",
               border: "1px solid rgba(31, 37, 34, 0.12)",
-            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
-          }}
-        >
-            <button
-              type="button"
-              onClick={() => {
-                setMeasurementMode("continuous");
-                setPendingLineStart((current) => current ?? getLastMeasuredEndpoint());
-                setPendingModeDecisionPoint(null);
-                setIsMeasurementSettingsOpen(false);
-              }}
-              style={{
-                border: 0,
-                borderRadius: 12,
-                padding: "10px 12px",
-                background: measurementMode === "continuous" ? "#1f2522" : "rgba(31, 37, 34, 0.08)",
-                color: measurementMode === "continuous" ? "#fff" : "#1f2522",
-                cursor: "pointer"
-              }}
-            >
-              Continuous
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMeasurementMode("new-line");
-                setPendingLineStart(null);
-                setPendingModeDecisionPoint(null);
-                setIsMeasurementSettingsOpen(false);
-              }}
-              style={{
-                border: 0,
-                borderRadius: 12,
-                padding: "10px 12px",
-                background: measurementMode === "new-line" ? "#1f2522" : "rgba(31, 37, 34, 0.08)",
-                color: measurementMode === "new-line" ? "#fff" : "#1f2522",
-                cursor: "pointer"
-              }}
-            >
-              New Line
-            </button>
-            <div
-              style={{
-                height: 1,
-                background: "rgba(31, 37, 34, 0.12)",
-                margin: "2px 0"
-              }}
-            />
+              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+            }}
+          >
             <div style={{ padding: "2px 4px", fontSize: 12, fontWeight: 700, color: "#5f685f", letterSpacing: "0.04em", textTransform: "uppercase" }}>
               Super Zoom
             </div>
@@ -1501,53 +1435,58 @@ export default function MapKitTestPage() {
             Super Zoom {superZoomScale}x
           </div>
         ) : null}
-        {pendingModeDecisionPoint ? (
-          <div
+      </div>
+      {pendingModeDecisionPoint && pendingModeDecisionAnchor ? (
+        <div
+          style={{
+            position: "absolute",
+            left: pendingModeDecisionAnchor.x,
+            top: pendingModeDecisionAnchor.y,
+            transform: "translate(-50%, 14px)",
+            zIndex: 3,
+            display: "grid",
+            gap: 8,
+            width: 144,
+            padding: 12,
+            borderRadius: 16,
+            background: "rgba(255, 255, 255, 0.97)",
+            border: "1px solid rgba(31, 37, 34, 0.12)",
+            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#1f2522" }}>
+            Continue or start new?
+          </div>
+          <button
+            type="button"
+            onClick={() => applyMeasurementModeChoice("continue")}
             style={{
-              display: "grid",
-              gap: 8,
-              width: "min(320px, calc(100vw - 32px))",
-              padding: 12,
-              borderRadius: 16,
-              background: "rgba(255, 255, 255, 0.97)",
-              border: "1px solid rgba(31, 37, 34, 0.12)",
-              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+              border: 0,
+              borderRadius: 12,
+              padding: "10px 12px",
+              background: "#1f2522",
+              color: "#fff",
+              cursor: "pointer"
             }}
           >
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#1f2522" }}>
-              Continue from previous or start a new line?
-            </div>
-            <button
-              type="button"
-              onClick={() => applyMeasurementModeChoice("continuous")}
-              style={{
-                border: 0,
-                borderRadius: 12,
-                padding: "10px 12px",
-                background: "#1f2522",
-                color: "#fff",
-                cursor: "pointer"
-              }}
-            >
-              Continue
-            </button>
-            <button
-              type="button"
-              onClick={() => applyMeasurementModeChoice("new-line")}
-              style={{
-                border: 0,
-                borderRadius: 12,
-                padding: "10px 12px",
-                background: "rgba(31, 37, 34, 0.08)",
-                color: "#1f2522",
-                cursor: "pointer"
-              }}
-            >
-              Start New
-            </button>
-          </div>
-        ) : null}
-      </div>
+            Continue
+          </button>
+          <button
+            type="button"
+            onClick={() => applyMeasurementModeChoice("start-new")}
+            style={{
+              border: 0,
+              borderRadius: 12,
+              padding: "10px 12px",
+              background: "rgba(31, 37, 34, 0.08)",
+              color: "#1f2522",
+              cursor: "pointer"
+            }}
+          >
+            Start New
+          </button>
+        </div>
+      ) : null}
       <div
         ref={mapViewportRef}
         style={{
@@ -1591,28 +1530,31 @@ export default function MapKitTestPage() {
                       y1={segment.startY}
                       x2={segment.endX}
                       y2={segment.endY}
-                      stroke="#1f2522"
-                      strokeWidth={4}
+                      stroke="#e0b93b"
+                      strokeWidth={3 * inverseSuperZoomScale}
                       strokeLinecap="round"
+                      strokeDasharray={`${6 * inverseSuperZoomScale} ${6 * inverseSuperZoomScale}`}
                     />
-                    <rect
-                      x={segment.labelX - 28}
-                      y={segment.labelY - 12}
-                      width={56}
-                      height={24}
-                      rx={12}
-                      fill="rgba(31, 37, 34, 0.82)"
-                    />
-                    <text
-                      x={segment.labelX}
-                      y={segment.labelY + 4}
-                      fill="#fff"
-                      textAnchor="middle"
-                      fontSize={13}
-                      fontWeight={700}
-                    >
-                      {segment.label}
-                    </text>
+                    <g transform={`translate(${segment.labelX} ${segment.labelY}) scale(${inverseSuperZoomScale})`}>
+                      <rect
+                        x={-24}
+                        y={-10}
+                        width={48}
+                        height={20}
+                        rx={10}
+                        fill="rgba(31, 37, 34, 0.82)"
+                      />
+                      <text
+                        x={0}
+                        y={3.5}
+                        fill="#fff"
+                        textAnchor="middle"
+                        fontSize="10pt"
+                        fontWeight={700}
+                      >
+                        {segment.label}
+                      </text>
+                    </g>
                   </g>
                 ))}
               </svg>
@@ -1628,19 +1570,33 @@ export default function MapKitTestPage() {
                     position: "absolute",
                     left: point.x,
                     top: point.y,
-                    width: point.tone === "pending" ? 22 : 20,
-                    height: point.tone === "pending" ? 22 : 20,
-                    transform: "translate(-50%, -50%)",
+                    width: 28,
+                    height: 28,
+                    transform: `translate(-50%, -50%) scale(${inverseSuperZoomScale})`,
                     borderRadius: 999,
-                    border: point.tone === "pending" ? "3px solid #1f2522" : "3px solid rgba(255,255,255,0.95)",
-                    background: point.tone === "pending" ? "#ffffff" : "#1f2522",
-                    boxShadow: "0 6px 18px rgba(20, 24, 22, 0.22)",
+                    border: 0,
+                    background: "transparent",
+                    padding: 0,
                     cursor: "grab",
                     pointerEvents: "auto",
-                    touchAction: "none"
+                    touchAction: "none",
+                    display: "grid",
+                    placeItems: "center"
                   }}
                   aria-label="Move measurement point"
-                />
+                >
+                  <span
+                    style={{
+                      display: "block",
+                      width: 10,
+                      height: 10,
+                      borderRadius: 999,
+                      border: point.tone === "pending" ? "2px solid #1f2522" : "2px solid rgba(255,255,255,0.95)",
+                      background: point.tone === "pending" ? "#ffffff" : "#1f2522",
+                      boxShadow: "0 6px 18px rgba(20, 24, 22, 0.22)"
+                    }}
+                  />
+                </button>
               ))}
             </div>
           ) : null}
