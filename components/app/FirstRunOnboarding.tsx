@@ -125,7 +125,7 @@ export function FirstRunOnboarding({ replayVersion = 0 }: { replayVersion?: numb
         display: "grid",
         placeItems: "center",
         padding: 24,
-        background: "rgba(31, 102, 199, 0.3)",
+        background: "rgba(31, 102, 199, 0.45)",
       }}
     >
       <div
