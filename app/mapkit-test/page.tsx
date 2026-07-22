@@ -1274,7 +1274,7 @@ export default function MapKitTestPage() {
               Super Zoom
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
-              {[1, 1.5, 2, 3].map((scale) => {
+              {[1, 1.5, 2, 3, 5].map((scale) => {
                 const active = superZoomScale === scale;
                 return (
                   <button
