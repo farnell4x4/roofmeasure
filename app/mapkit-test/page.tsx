@@ -171,7 +171,22 @@ export default function MapKitTestPage() {
       return;
     }
 
-    const clampedOffsets = clampSuperZoomOffsets(nextScale, superZoomOffsetX, superZoomOffsetY);
+    const bounds = mapViewportRef.current?.getBoundingClientRect();
+    if (!bounds) {
+      const clampedOffsets = clampSuperZoomOffsets(nextScale, superZoomOffsetX, superZoomOffsetY);
+      setSuperZoomScale(nextScale);
+      setSuperZoomOffsetX(clampedOffsets.x);
+      setSuperZoomOffsetY(clampedOffsets.y);
+      return;
+    }
+
+    const centerX = bounds.width / 2;
+    const centerY = bounds.height / 2;
+    const baseCenterX = (centerX - superZoomOffsetX) / superZoomScale;
+    const baseCenterY = (centerY - superZoomOffsetY) / superZoomScale;
+    const nextOffsetX = centerX - baseCenterX * nextScale;
+    const nextOffsetY = centerY - baseCenterY * nextScale;
+    const clampedOffsets = clampSuperZoomOffsets(nextScale, nextOffsetX, nextOffsetY);
     setSuperZoomScale(nextScale);
     setSuperZoomOffsetX(clampedOffsets.x);
     setSuperZoomOffsetY(clampedOffsets.y);
