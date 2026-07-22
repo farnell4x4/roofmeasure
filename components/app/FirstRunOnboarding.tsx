@@ -30,7 +30,7 @@ const ONBOARDING_STEPS = [
     completed.
   </>,
   <>
-    Tap on blue plane to assign pitch.
+    Tap the ?/12 label on a blue plane to assign its pitch.
   </>,
   <>
     Each address measured saves locally to your device and can be revisited.

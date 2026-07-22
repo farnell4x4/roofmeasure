@@ -1376,7 +1376,7 @@ function MapKitTestPage() {
   }
 
   function openPlanePitchMenu(
-    event: React.MouseEvent<SVGPolygonElement>,
+    event: React.MouseEvent<SVGTextElement>,
     plane: RoofPlane,
   ) {
     event.preventDefault()
@@ -2880,7 +2880,7 @@ function MapKitTestPage() {
                 : pendingModeDecisionAnchor.x + 20,
             top: Math.min(
               Math.max(pendingModeDecisionAnchor.y - 44, 12),
-              window.innerHeight - 108,
+              window.innerHeight - 144,
             ),
             zIndex: 3,
             display: "grid",
@@ -2920,6 +2920,23 @@ function MapKitTestPage() {
             }}
           >
             Start New
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPendingModeDecisionPoint(null)
+              setPendingModeDecisionAnchor(null)
+            }}
+            style={{
+              border: 0,
+              padding: "3px 4px 0",
+              background: "transparent",
+              color: "rgba(31, 37, 34, 0.62)",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            Close
           </button>
         </div>
       ) : null}
@@ -3206,27 +3223,33 @@ function MapKitTestPage() {
                       stroke="rgba(22, 91, 196, 0.9)"
                       strokeWidth={2}
                       strokeLinejoin="round"
-                      style={{ pointerEvents: "auto", cursor: "pointer" }}
-                      onClick={(event) => openPlanePitchMenu(event, plane)}
+                      style={{ pointerEvents: "none" }}
                     />
-                    {plane.pitch ? (
-                      <text
-                        x={labelCenter.x}
-                        y={labelCenter.y}
-                        fill="#fff"
-                        stroke="#000"
-                        strokeWidth={3}
-                        paintOrder="stroke"
-                        strokeLinejoin="round"
-                        textAnchor="middle"
-                        dominantBaseline="central"
-                        fontSize={10}
-                        fontWeight={800}
-                        pointerEvents="none"
-                      >
-                        {plane.pitch.replace(/12$/, "")}
-                      </text>
-                    ) : null}
+                    <text
+                      x={labelCenter.x}
+                      y={labelCenter.y}
+                      fill="#fff"
+                      stroke="#000"
+                      strokeWidth={3}
+                      paintOrder="stroke"
+                      strokeLinejoin="round"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={10}
+                      fontWeight={800}
+                      style={
+                        plane.pitch
+                          ? { pointerEvents: "none" }
+                          : { pointerEvents: "auto", cursor: "pointer" }
+                      }
+                      onClick={
+                        plane.pitch
+                          ? undefined
+                          : (event) => openPlanePitchMenu(event, plane)
+                      }
+                    >
+                      {plane.pitch?.replace(/12$/, "") ?? "?/12"}
+                    </text>
                   </g>
                 )
               })}
