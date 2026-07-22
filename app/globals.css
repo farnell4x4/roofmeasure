@@ -59,6 +59,13 @@ body {
   min-height: 100vh;
 }
 
+/* The measuring canvas needs gesture control, while list pages need native scrolling. */
+html.projects-page,
+body.projects-page {
+  touch-action: pan-y;
+  overscroll-behavior-y: auto;
+}
+
 a {
   color: inherit;
   text-decoration: none;
@@ -116,6 +123,76 @@ img {
 .page-grid {
   display: grid;
   gap: 16px;
+}
+
+.projects-screen__header,
+.projects-screen__project-header,
+.projects-screen__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.projects-screen__header,
+.projects-screen__project-header {
+  justify-content: space-between;
+}
+
+.projects-screen__header {
+  align-items: center;
+}
+
+.projects-screen__intro,
+.projects-screen__project-details {
+  min-width: 0;
+}
+
+.projects-screen__project-details h2,
+.projects-screen__project-details p {
+  overflow-wrap: anywhere;
+}
+
+.projects-screen__filters-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, auto);
+  gap: 12px;
+  align-items: end;
+}
+
+.projects-screen__list {
+  display: grid;
+  gap: 14px;
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    padding: 16px 12px max(28px, env(safe-area-inset-bottom));
+  }
+
+  .projects-screen__header > .projects-screen__intro,
+  .projects-screen__header > button,
+  .projects-screen__filters-grid > label,
+  .projects-screen__filters-grid select {
+    width: 100%;
+  }
+
+  .projects-screen__filters-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .projects-screen__project .chip {
+    max-width: 100%;
+  }
+
+  .projects-screen__actions > button {
+    flex: 1 1 140px;
+  }
+}
+
+@media (max-width: 390px) {
+  .projects-screen__actions > button {
+    flex-basis: 100%;
+  }
 }
 
 @media (min-width: 900px) {

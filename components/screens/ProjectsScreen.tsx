@@ -1,7 +1,7 @@
 "use client"
 
 import { Copy, Download, FolderOpen, Plus, Trash2, Upload } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/Button"
 import { Card } from "@/components/ui/Card"
@@ -20,6 +20,15 @@ export function ProjectsScreen() {
   const { projects, isLoading, refresh } = useProjects()
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<"recent" | "name" | "address">("recent")
+
+  useEffect(() => {
+    document.documentElement.classList.add("projects-page")
+    document.body.classList.add("projects-page")
+    return () => {
+      document.documentElement.classList.remove("projects-page")
+      document.body.classList.remove("projects-page")
+    }
+  }, [])
 
   const filtered = useMemo(() => {
     const normalizedQuery = query.toLowerCase()
@@ -89,17 +98,9 @@ export function ProjectsScreen() {
   }
 
   return (
-    <main className="app-shell page-grid">
-      <section
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 12,
-          alignItems: "center",
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
+    <main className="app-shell page-grid projects-screen">
+      <section className="projects-screen__header">
+        <div className="projects-screen__intro">
           <p className="chip">Saved Projects</p>
           <h1 style={{ marginBottom: 8 }}>Local projects and reports</h1>
           <p style={{ color: "var(--muted)", margin: 0 }}>
@@ -112,15 +113,8 @@ export function ProjectsScreen() {
         </Button>
       </section>
 
-      <Card style={{ display: "grid", gap: 12 }}>
-        <div
-          style={{
-            display: "grid",
-            gap: 12,
-            gridTemplateColumns: "1fr auto",
-            alignItems: "end",
-          }}
-        >
+      <Card className="projects-screen__filters" style={{ display: "grid", gap: 12 }}>
+        <div className="projects-screen__filters-grid">
           <Input
             id="project-search"
             label="Search projects"
@@ -172,20 +166,13 @@ export function ProjectsScreen() {
         />
       ) : null}
 
-      <section style={{ display: "grid", gap: 14 }}>
+      <section className="projects-screen__list">
         {filtered.map((project) => {
           const totals = calculateProjectTotals(project)
           return (
-            <Card key={project.id} style={{ display: "grid", gap: 14 }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div>
+            <Card key={project.id} className="projects-screen__project" style={{ display: "grid", gap: 14 }}>
+              <div className="projects-screen__project-header">
+                <div className="projects-screen__project-details">
                   <h2 style={{ margin: "0 0 4px" }}>{project.name}</h2>
                   <p style={{ margin: 0, color: "var(--muted)" }}>
                     {project.location?.formattedAddress ??
@@ -214,7 +201,7 @@ export function ProjectsScreen() {
                 </span>
                 <span>{totals.planeCount} roof planes</span>
               </div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div className="projects-screen__actions">
                 <Button onClick={() => handleOpenProject(project)}>
                   <FolderOpen size={18} /> Open
                 </Button>
