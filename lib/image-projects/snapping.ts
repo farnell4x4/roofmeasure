@@ -1,7 +1,8 @@
 import type { ImageMeasurementSegment, ImagePoint } from "@/types/image-projects"
 
 const IMAGE_SNAP_RATIO = 0.0015
-const MIN_IMAGE_SNAP_PIXELS = 6
+// Keep snapping easy to use without pulling points onto a nearby line too early.
+const MIN_IMAGE_SNAP_SCREEN_PIXELS = 4
 const POINT_ON_LINE_TOLERANCE_PIXELS = 0.01
 const ENDPOINT_RATIO_TOLERANCE = 0.000_001
 
@@ -11,8 +12,15 @@ type ClosestPoint = {
   ratio: number
 }
 
-export function imageSnapTolerance(imageWidth: number, imageHeight: number) {
-  return Math.max(MIN_IMAGE_SNAP_PIXELS, Math.hypot(imageWidth, imageHeight) * IMAGE_SNAP_RATIO)
+export function imageSnapTolerance(
+  imageWidth: number,
+  imageHeight: number,
+  sourcePixelsPerScreenPixel = 1,
+) {
+  return Math.max(
+    Math.hypot(imageWidth, imageHeight) * IMAGE_SNAP_RATIO,
+    MIN_IMAGE_SNAP_SCREEN_PIXELS * sourcePixelsPerScreenPixel,
+  )
 }
 
 function closestPointOnSegment(point: ImagePoint, segment: ImageMeasurementSegment): ClosestPoint {
@@ -42,13 +50,14 @@ export function snapImagePointToMeasurementLine(
   segments: ImageMeasurementSegment[],
   imageWidth: number,
   imageHeight: number,
+  sourcePixelsPerScreenPixel = 1,
 ) {
   const nearest = segments.reduce<ClosestPoint | null>((best, segment) => {
     const candidate = closestPointOnSegment(point, segment)
     return !best || candidate.distancePixels < best.distancePixels ? candidate : best
   }, null)
 
-  return nearest && nearest.distancePixels <= imageSnapTolerance(imageWidth, imageHeight)
+  return nearest && nearest.distancePixels <= imageSnapTolerance(imageWidth, imageHeight, sourcePixelsPerScreenPixel)
     ? nearest.point
     : point
 }

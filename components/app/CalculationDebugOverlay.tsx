@@ -8,6 +8,7 @@ import {
 } from "@/lib/debug/calculation-debug";
 
 export function CalculationDebugOverlay() {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- retained for the commented-out debug trigger below.
   const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState<ReturnType<typeof getCalculationDebugEntries>>([]);
 
@@ -41,7 +42,8 @@ export function CalculationDebugOverlay() {
 
   return (
     <div style={{ position: "fixed", top: 12, right: 12, zIndex: 10000 }}>
-      <button
+      {/* Keep the debug trigger available for future troubleshooting, but hide it from the product UI. */}
+      {/* <button
         type="button"
         onClick={() => setOpen((current) => !current)}
         style={{
@@ -56,7 +58,7 @@ export function CalculationDebugOverlay() {
         }}
       >
         Data Debug{entries.length ? ` (${entries.length})` : ""}
-      </button>
+      </button> */}
       {open ? (
         <section
           aria-label="Calculation debug notes"

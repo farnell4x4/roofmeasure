@@ -13,17 +13,30 @@ const baseLine = {
 }
 
 describe("image measurement snapping", () => {
-  it("uses an image-relative tolerance with a touch-friendly minimum", () => {
-    expect(imageSnapTolerance(800, 600)).toBe(6)
+  it("uses an image-relative tolerance with a restrained screen-space minimum", () => {
+    expect(imageSnapTolerance(800, 600)).toBe(4)
     expect(imageSnapTolerance(4000, 3000)).toBe(7.5)
+    expect(imageSnapTolerance(4000, 3000, 10)).toBe(40)
   })
 
   it("snaps a point within tolerance to the nearest position on a line", () => {
     const snapped = snapImagePointToMeasurementLine(
-      { x: 50, y: 5 },
+        { x: 50, y: 4 },
       [baseLine],
       800,
       600,
+    )
+
+    expect(snapped).toEqual({ x: 50, y: 0 })
+  })
+
+  it("keeps the touch target usable when a large image is scaled down", () => {
+    const snapped = snapImagePointToMeasurementLine(
+        { x: 50, y: 40 },
+      [baseLine],
+      4000,
+      3000,
+      10,
     )
 
     expect(snapped).toEqual({ x: 50, y: 0 })

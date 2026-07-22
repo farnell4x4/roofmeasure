@@ -191,6 +191,22 @@ function ImageProjectScreen() {
     if (x < bounds.left || x > bounds.left + bounds.width || y < bounds.top || y > bounds.top + bounds.height) return null
     return { x: ((x - bounds.left) / bounds.width) * project.imageWidth, y: ((y - bounds.top) / bounds.height) * project.imageHeight }
   }
+  function snapImagePoint(point: ImagePoint, current: ImageProject, segments = current.segments) {
+    const stage = stageRef.current
+    const baseScale = stage
+      ? Math.min(stage.clientWidth / current.imageWidth, stage.clientHeight / current.imageHeight)
+      : 1
+    const sourcePixelsPerScreenPixel = baseScale > 0
+      ? 1 / (baseScale * imageZoomRef.current.scale)
+      : 1
+    return snapImagePointToMeasurementLine(
+      point,
+      segments,
+      current.imageWidth,
+      current.imageHeight,
+      sourcePixelsPerScreenPixel,
+    )
+  }
   function visualPoint(point: ImagePoint) {
     if (!project || !imageBounds) return null
     return { x: imageBounds.left + (point.x / project.imageWidth) * imageBounds.width, y: imageBounds.top + (point.y / project.imageHeight) * imageBounds.height }
@@ -208,7 +224,7 @@ function ImageProjectScreen() {
     if (!current || decision) return
     const rawPoint = stagePoint(event)
     if (!rawPoint) return
-    const point = snapImagePointToMeasurementLine(rawPoint, current.segments, current.imageWidth, current.imageHeight)
+    const point = snapImagePoint(rawPoint, current)
     closeMenus()
     if (!current.pendingLineStart) { updateSegments(current.segments, point); setComeFromArmed(false); return }
     if (comeFromArmed) {
@@ -299,11 +315,10 @@ function ImageProjectScreen() {
     const rawPoint = stagePoint(event)
     const current = imageProjectRef.current
     if (!current || !drag || drag.pointerId !== event.pointerId || !rawPoint) return
-    const next = snapImagePointToMeasurementLine(
+    const next = snapImagePoint(
       rawPoint,
+      current,
       current.segments.filter((segment) => imagePointKey(segment.start) !== drag.key && imagePointKey(segment.end) !== drag.key),
-      current.imageWidth,
-      current.imageHeight,
     )
     event.preventDefault(); event.stopPropagation()
     updateSegments(current.segments.map((segment) => ({ ...segment, start: imagePointKey(segment.start) === drag.key ? next : segment.start, end: imagePointKey(segment.end) === drag.key ? next : segment.end })), current.pendingLineStart && imagePointKey(current.pendingLineStart) === drag.key ? next : current.pendingLineStart)
