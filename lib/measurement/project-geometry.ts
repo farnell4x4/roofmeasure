@@ -16,6 +16,7 @@ export function measurementGeometrySignature(
   return JSON.stringify({
     segments: measurementSegments.map((segment) => ({
       id: segment.id,
+      type: segment.type,
       start: {
         latitude: segment.start.latitude,
         longitude: segment.start.longitude,
@@ -62,7 +63,7 @@ export function toProjectMeasurementData(
     const endPoint = ensurePoint(segment.end)
     return {
       id: segment.id,
-      type: "eave" as const,
+      type: segment.type ?? "eave",
       startPointId: startPoint.id,
       endPointId: endPoint.id,
       lengthFeet: haversineDistanceFeet(
@@ -79,6 +80,7 @@ export function toProjectMeasurementData(
     measurementGeometry: {
       segments: measurementSegments.map((segment) => ({
         id: segment.id,
+        type: segment.type,
         start: { ...segment.start },
         end: { ...segment.end },
       })),
@@ -89,15 +91,21 @@ export function toProjectMeasurementData(
   }
 }
 
-export function fromProjectMeasurementData(project: Project) {
+export function fromProjectMeasurementData(project: Project): {
+  segments: EditableMeasurementSegment[]
+  pendingLineStart: MeasurementPoint | null
+} {
   const canonicalGeometry = project.measurementGeometry
   if (canonicalGeometry?.segments) {
     return {
-      segments: canonicalGeometry.segments.map((segment) => ({
+      segments: canonicalGeometry.segments.map(
+        (segment): EditableMeasurementSegment => ({
         id: segment.id,
+        ...(segment.type ? { type: segment.type } : {}),
         start: { ...segment.start },
         end: { ...segment.end },
-      })),
+        }),
+      ),
       pendingLineStart: canonicalGeometry.pendingLineStart
         ? { ...canonicalGeometry.pendingLineStart }
         : null,
@@ -108,7 +116,7 @@ export function fromProjectMeasurementData(project: Project) {
   const usedPointIds = new Set<string>()
 
   const segments = project.segments
-    .map((segment) => {
+    .map((segment): EditableMeasurementSegment | null => {
       const startPoint = pointsById.get(segment.startPointId)
       const endPoint = pointsById.get(segment.endPointId)
       if (!startPoint || !endPoint) return null

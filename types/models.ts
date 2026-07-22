@@ -19,6 +19,7 @@ export type EditableMeasurementPoint = {
 
 export type EditableMeasurementSegment = {
   id: string;
+  type?: MeasurementType;
   start: EditableMeasurementPoint;
   end: EditableMeasurementPoint;
 };

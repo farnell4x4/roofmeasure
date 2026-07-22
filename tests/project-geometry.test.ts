@@ -93,6 +93,23 @@ describe("project measurement geometry", () => {
     expect(hydrated.pendingLineStart).toEqual(canonicalEnd)
   })
 
+  it("preserves an optional line type through canonical project geometry", () => {
+    const start = { latitude: 40.1, longitude: -104.1 }
+    const end = { latitude: 40.2, longitude: -104.2 }
+    const geometry = toProjectMeasurementData([
+      { id: "ridge", type: "ridge", start, end },
+    ])
+    const project = createEmptyProject("Typed Roof")
+    project.measurementGeometry = geometry.measurementGeometry
+
+    expect(fromProjectMeasurementData(project).segments[0]).toEqual({
+      id: "ridge",
+      type: "ridge",
+      start,
+      end,
+    })
+  })
+
   it("keeps the canonical geometry signature unchanged when only the visual zoom changes", () => {
     const segments = [
       {

@@ -103,6 +103,7 @@ export function splitMeasurementSegmentsAtKnownPoints(
     ]
     return points.slice(0, -1).map((start, index) => ({
       id: `${segment.id}:split:${index + 1}`,
+      type: segment.type,
       start,
       end: points[index + 1],
     }))

@@ -48,6 +48,7 @@ import {
   EditableMeasurementPoint as MeasurementPoint,
   EditableMeasurementSegment as MeasurementSegment,
   MapCameraState,
+  MeasurementType,
   PropertyLocation,
   Project,
   RoofPlane,
@@ -72,6 +73,10 @@ type PlanePitchMenuState = {
   anchor: DecisionAnchor
   draft: string
 }
+type SegmentTypeMenuState = {
+  segmentId: string
+  anchor: DecisionAnchor
+}
 type ProjectedMeasurementPoint = MeasurementPoint & {
   key: string
   x: number
@@ -86,9 +91,27 @@ type ProjectedMeasurementOverlay = {
     endX: number
     endY: number
     lengthFeet: number
+    type?: MeasurementType
     label: string
   }>
   points: ProjectedMeasurementPoint[]
+}
+
+const SEGMENT_TYPE_OPTIONS: Array<{
+  type: MeasurementType
+  label: string
+}> = [
+  { type: "ridge", label: "Ridge" },
+  { type: "hip", label: "Hip" },
+  { type: "valley", label: "Valley" },
+  { type: "rake", label: "Rake" },
+  { type: "eave", label: "Eave" },
+]
+
+function formatMeasurementLabel(lengthFeet: number, type?: MeasurementType) {
+  const typeLetter =
+    type === "ridge" ? "R" : type ? type.charAt(0) : ""
+  return `${Math.round(lengthFeet)}'${typeLetter}`
 }
 
 function polygonLabelCenter(points: Array<{ x: number; y: number }>) {
@@ -359,6 +382,8 @@ function MapKitTestPage() {
     useState<PointActionMenuState | null>(null)
   const [planePitchMenu, setPlanePitchMenu] =
     useState<PlanePitchMenuState | null>(null)
+  const [segmentTypeMenu, setSegmentTypeMenu] =
+    useState<SegmentTypeMenuState | null>(null)
   const [roofPlanes, setRoofPlanes] = useState<RoofPlane[]>([])
   const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] =
     useState(false)
@@ -710,6 +735,7 @@ function MapKitTestPage() {
     setPendingModeDecisionAnchor(null)
     setPointActionMenu(null)
     setPlanePitchMenu(null)
+    setSegmentTypeMenu(null)
     setIsMeasurementSettingsOpen(false)
   }
 
@@ -1148,6 +1174,7 @@ function MapKitTestPage() {
   ) {
     setPointActionMenu(null)
     setPlanePitchMenu(null)
+    setSegmentTypeMenu(null)
     const current = measurementGeometryRef.current
     const tappedPoint = snapPointToMeasurementLine(
       tappedCoordinate,
@@ -1221,6 +1248,7 @@ function MapKitTestPage() {
     setPendingModeDecisionAnchor(null)
     setPointActionMenu(null)
     setPlanePitchMenu(null)
+    setSegmentTypeMenu(null)
     setIsMeasurementSettingsOpen(false)
 
     if (!decisionPoint) return
@@ -1291,6 +1319,7 @@ function MapKitTestPage() {
     setPendingModeDecisionPoint(null)
     setPendingModeDecisionAnchor(null)
     setPlanePitchMenu(null)
+    setSegmentTypeMenu(null)
     const visualPoint = baseViewportPointToVisualViewportPoint(
       { x: point.x, y: point.y },
       precisionZoom,
@@ -1311,6 +1340,7 @@ function MapKitTestPage() {
     event.preventDefault()
     event.stopPropagation()
     setPointActionMenu(null)
+    setSegmentTypeMenu(null)
     setPendingModeDecisionPoint(null)
     setPendingModeDecisionAnchor(null)
     setPlanePitchMenu({
@@ -1318,6 +1348,38 @@ function MapKitTestPage() {
       anchor: { x: event.clientX, y: event.clientY },
       draft: plane.pitch?.replace(/\/12$/, "") ?? "",
     })
+  }
+
+  function openSegmentTypeMenu(
+    event: React.MouseEvent<SVGTextElement>,
+    segment: ProjectedMeasurementOverlay["segments"][number],
+  ) {
+    event.preventDefault()
+    event.stopPropagation()
+    setPointActionMenu(null)
+    setPlanePitchMenu(null)
+    setPendingModeDecisionPoint(null)
+    setPendingModeDecisionAnchor(null)
+    setSegmentTypeMenu({
+      segmentId: segment.id,
+      anchor: { x: event.clientX, y: event.clientY },
+    })
+  }
+
+  function setSegmentType(
+    segmentId: string,
+    type: MeasurementType | undefined,
+  ) {
+    const current = measurementGeometryRef.current
+    const next: MeasurementGeometryState = {
+      ...current,
+      segments: current.segments.map((segment) =>
+        segment.id === segmentId ? { ...segment, type } : segment,
+      ),
+    }
+    replaceMeasurementGeometry(next)
+    persistMeasurementGeometry(next)
+    setSegmentTypeMenu(null)
   }
 
   function persistRoofPlanes(nextPlanes: RoofPlane[]) {
@@ -1488,12 +1550,13 @@ function MapKitTestPage() {
 
       return {
         id: segment.id,
+        type: segment.type,
         startX,
         startY,
         endX,
         endY,
         lengthFeet,
-        label: `${Math.round(lengthFeet)}'`,
+        label: formatMeasurementLabel(lengthFeet, segment.type),
       }
     })
 
@@ -2969,6 +3032,49 @@ function MapKitTestPage() {
           </div>
         </form>
       ) : null}
+      {segmentTypeMenu ? (
+        <div
+          style={{
+            position: "absolute",
+            left: Math.min(
+              Math.max(segmentTypeMenu.anchor.x - 68, 12),
+              window.innerWidth - 148,
+            ),
+            top: Math.min(
+              Math.max(segmentTypeMenu.anchor.y + 16, 12),
+              window.innerHeight - 278,
+            ),
+            zIndex: 4,
+            display: "grid",
+            gap: 6,
+            width: 136,
+            padding: 10,
+            borderRadius: 16,
+            background: "rgba(255, 255, 255, 0.97)",
+            border: "1px solid rgba(31, 37, 34, 0.12)",
+            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
+          }}
+        >
+          {SEGMENT_TYPE_OPTIONS.map((option) => (
+            <button
+              key={option.type}
+              type="button"
+              onClick={() => setSegmentType(segmentTypeMenu.segmentId, option.type)}
+              style={{
+                border: 0,
+                borderRadius: 10,
+                padding: "8px 10px",
+                background: "rgba(31, 37, 34, 0.08)",
+                color: "#1f2522",
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div
         ref={mapViewportRef}
         style={{
@@ -3096,6 +3202,8 @@ function MapKitTestPage() {
                         textAnchor="middle"
                         fontSize={10}
                         fontWeight={700}
+                        style={{ pointerEvents: "auto", cursor: "pointer" }}
+                        onClick={(event) => openSegmentTypeMenu(event, segment)}
                       >
                         {segment.label}
                       </text>
