@@ -64,7 +64,10 @@ export function ProjectsScreen() {
         return leftAddress.localeCompare(rightAddress)
       })
     }
-    return items
+    return items.sort((left, right) => {
+      const difference = Date.parse(right.project.updatedAt) - Date.parse(left.project.updatedAt)
+      return difference || left.project.name.localeCompare(right.project.name)
+    })
   }, [imageProjects, projects, query, sort])
 
   async function handleDeleteProject(id: string) {

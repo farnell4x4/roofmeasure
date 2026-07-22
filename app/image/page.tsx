@@ -1,7 +1,7 @@
 "use client"
 
-import { FileImage, Settings } from "lucide-react"
-import { ChangeEvent, PointerEvent as ReactPointerEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { FileImage, Minus, Plus, RotateCcw, Settings } from "lucide-react"
+import { ChangeEvent, PointerEvent as ReactPointerEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState, WheelEvent as ReactWheelEvent } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { db } from "@/lib/persistence/db"
 import { detectImageRoofPlanes } from "@/lib/image-projects/plane-detection"
@@ -134,6 +134,27 @@ function ImageProjectScreen() {
     imageZoomRef.current = normalized
     setImageZoom(normalized)
   }
+  function zoomAround(point: { x: number; y: number }, multiplier: number) {
+    const stage = stageRef.current
+    if (!stage) return
+    const zoom = imageZoomRef.current
+    const scale = Math.min(MAX_IMAGE_ZOOM, Math.max(1, zoom.scale * multiplier))
+    if (scale === zoom.scale) return
+    const centerX = stage.clientWidth / 2
+    const centerY = stage.clientHeight / 2
+    const sourceX = centerX + (point.x - zoom.offsetX - centerX) / zoom.scale
+    const sourceY = centerY + (point.y - zoom.offsetY - centerY) / zoom.scale
+    setZoom({
+      scale,
+      offsetX: point.x - centerX - (sourceX - centerX) * scale,
+      offsetY: point.y - centerY - (sourceY - centerY) * scale,
+    })
+  }
+  function zoomFromCenter(multiplier: number) {
+    const stage = stageRef.current
+    if (!stage) return
+    zoomAround({ x: stage.clientWidth / 2, y: stage.clientHeight / 2 }, multiplier)
+  }
   function stageRelativePoint(event: { clientX: number; clientY: number }) {
     const rect = stageRef.current?.getBoundingClientRect()
     return rect ? { x: event.clientX - rect.left, y: event.clientY - rect.top } : null
@@ -244,6 +265,12 @@ function ImageProjectScreen() {
     if (canvasPointers.current.size < 2) canvasGesture.current = null
     if (canvasPan.current?.pointerId === event.pointerId) canvasPan.current = null
   }
+  function handleCanvasWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    const point = stageRelativePoint(event)
+    if (!point) return
+    event.preventDefault()
+    zoomAround(point, event.deltaY < 0 ? 1.2 : 1 / 1.2)
+  }
   function applyDecision(mode: "continue" | "new") {
     const current = imageProjectRef.current
     if (!current || !decision) return
@@ -275,10 +302,16 @@ function ImageProjectScreen() {
   return <main style={{ position: "fixed", inset: 0, background: "#d9ddd8" }}>
     <div style={{ position: "absolute", top: 14, left: 14, zIndex: 3, display: "grid", gap: 8 }}>
       <div style={{ padding: "10px 12px", borderRadius: 16, background: "rgba(255,255,255,.94)", boxShadow: "0 10px 24px rgba(20,24,22,.12)", fontSize: 14, fontWeight: 700 }}>{project.name}</div>
+      <div aria-label="Image zoom" style={{ display: "flex", alignItems: "center", gap: 4, width: "max-content", padding: 4, borderRadius: 14, background: "rgba(255,255,255,.94)", boxShadow: "0 10px 24px rgba(20,24,22,.12)" }}>
+        <button type="button" aria-label="Zoom out" title="Zoom out" disabled={imageZoom.scale <= 1} onClick={() => zoomFromCenter(1 / 1.2)} style={{ ...buttonStyle, display: "grid", placeItems: "center", padding: 8, background: "transparent", opacity: imageZoom.scale <= 1 ? .4 : 1 }}><Minus size={16}/></button>
+        <span aria-live="polite" style={{ minWidth: 42, textAlign: "center", fontSize: 13, fontWeight: 700 }}>{imageZoom.scale.toFixed(1)}×</span>
+        <button type="button" aria-label="Zoom in" title="Zoom in" disabled={imageZoom.scale >= MAX_IMAGE_ZOOM} onClick={() => zoomFromCenter(1.2)} style={{ ...buttonStyle, display: "grid", placeItems: "center", padding: 8, background: "transparent", opacity: imageZoom.scale >= MAX_IMAGE_ZOOM ? .4 : 1 }}><Plus size={16}/></button>
+        <button type="button" aria-label="Reset image zoom" title="Reset image zoom" disabled={imageZoom.scale === 1 && imageZoom.offsetX === 0 && imageZoom.offsetY === 0} onClick={() => setZoom({ scale: 1, offsetX: 0, offsetY: 0 })} style={{ ...buttonStyle, display: "grid", placeItems: "center", padding: 8, background: "transparent", opacity: imageZoom.scale === 1 && imageZoom.offsetX === 0 && imageZoom.offsetY === 0 ? .4 : 1 }}><RotateCcw size={15}/></button>
+      </div>
       <button type="button" onClick={() => setSettingsOpen((open) => !open)} style={{ ...buttonStyle, justifySelf: "start", display: "flex", alignItems: "center", gap: 7, background: "rgba(255,255,255,.94)" }}><Settings size={16}/> Settings</button>
       {settingsOpen ? <div style={{ ...popupStyle, width: 190 }}><button type="button" onClick={() => router.push("/projects")} style={{ ...buttonStyle, background: "rgba(31,37,34,.08)" }}>Projects</button><label style={{ ...buttonStyle, background: "rgba(31,37,34,.08)", textAlign: "center" }}><input className="sr-only" type="file" accept="image/*" onChange={choosePhoto}/>Replace image</label></div> : null}
     </div>
-    <div ref={setStage} onClick={handleStageClick} onPointerDown={handleCanvasPointerDown} onPointerMove={handleCanvasPointerMove} onPointerUp={handleCanvasPointerEnd} onPointerCancel={handleCanvasPointerEnd} style={{ position: "absolute", inset: 0, overflow: "hidden", touchAction: "none", cursor: imageZoom.scale > 1 ? "grab" : "crosshair" }}>
+    <div ref={setStage} data-image-zoom-canvas onClick={handleStageClick} onPointerDown={handleCanvasPointerDown} onPointerMove={handleCanvasPointerMove} onPointerUp={handleCanvasPointerEnd} onPointerCancel={handleCanvasPointerEnd} onWheel={handleCanvasWheel} style={{ position: "absolute", inset: 0, overflow: "hidden", touchAction: "none", cursor: imageZoom.scale > 1 ? "grab" : "crosshair" }}>
       <div style={{ position: "absolute", inset: 0, transform: `translate(${imageZoom.offsetX}px, ${imageZoom.offsetY}px) scale(${imageZoom.scale})`, transformOrigin: "center", pointerEvents: "none" }}>
       <img src={imageUrl} alt="Roof to measure" draggable={false} style={{ position: "absolute", inset: 0, zIndex: 0, width: "100%", height: "100%", objectFit: "contain", userSelect: "none", pointerEvents: "none" }}/>
       {imageBounds ? <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none", overflow: "visible" }}>{renderedPlanes.map((plane) => { const center = plane.points.reduce((sum, point) => ({ x: sum.x + point.x / plane.points.length, y: sum.y + point.y / plane.points.length }), { x: 0, y: 0 }); return <g key={plane.id}><polygon points={plane.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="rgba(40,128,255,.5)" stroke="rgba(22,91,196,.9)" strokeWidth="2"/><text x={center.x} y={center.y} fill="#fff" stroke="#000" strokeWidth="3" paintOrder="stroke" textAnchor="middle" dominantBaseline="central" fontSize="10" fontWeight="800" style={{ pointerEvents: "auto", cursor: "pointer" }} onClick={(event) => { event.stopPropagation(); setPitchMenu({ planeId: plane.id, anchor: { x: event.clientX, y: event.clientY }, draft: plane.pitch?.replace(/\/12$/, "") ?? "" }) }}>{plane.pitch?.replace(/12$/, "") ?? "?/12"}</text></g> })}{project.segments.map((segment) => { const start = visualPoint(segment.start); const end = visualPoint(segment.end); if (!start || !end) return null; const dx = end.x-start.x, dy=end.y-start.y, length=Math.hypot(dx,dy)||1; return <g key={segment.id}><line x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#e0b93b" strokeWidth="3" strokeLinecap="round" strokeDasharray="6 6"/><text x={(start.x+end.x)/2+(-dy/length)*17} y={(start.y+end.y)/2+(dx/length)*17} fill="#ffff00" stroke="#000" strokeWidth="3" paintOrder="stroke" textAnchor="middle" fontSize="10" fontWeight="700" style={{ pointerEvents: "auto", cursor: "pointer" }} onClick={(event) => { event.stopPropagation(); setLineMenu({ segmentId: segment.id, anchor: { x: event.clientX, y: event.clientY } }) }}>{labelForLength(segment.lengthFeet, segment.type)}</text></g> })}</svg> : null}

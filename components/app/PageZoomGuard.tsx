@@ -4,14 +4,18 @@ import { useEffect } from "react";
 
 export function PageZoomGuard() {
   useEffect(() => {
+    function isImageCanvasEvent(event: Event) {
+      return event.target instanceof Element && Boolean(event.target.closest("[data-image-zoom-canvas]"))
+    }
+
     function preventMultiTouchZoom(event: TouchEvent) {
-      if (event.touches.length > 1) {
+      if (event.touches.length > 1 && !isImageCanvasEvent(event)) {
         event.preventDefault();
       }
     }
 
     function preventGestureZoom(event: Event) {
-      event.preventDefault();
+      if (!isImageCanvasEvent(event)) event.preventDefault();
     }
 
     document.addEventListener("touchmove", preventMultiTouchZoom, { passive: false });
