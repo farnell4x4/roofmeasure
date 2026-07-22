@@ -13,13 +13,13 @@ import { formatArea } from "@/lib/measurement/units"
 import { calculateProjectTotals } from "@/lib/measurement/calculations"
 import { useProjects } from "@/hooks/useProjects"
 import { appendPersistenceDebugNote } from "@/lib/debug/persistence-debug"
-import type { ImageProject } from "@/types/image-projects"
+import type { ImageProjectListItem } from "@/types/image-projects"
 
 export function ProjectsScreen() {
   const router = useRouter()
   const { push } = useToast()
   const { projects, isLoading, refresh } = useProjects()
-  const [imageProjects, setImageProjects] = useState<ImageProject[]>([])
+  const [imageProjects, setImageProjects] = useState<ImageProjectListItem[]>([])
   const [imageProjectsLoading, setImageProjectsLoading] = useState(true)
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<"recent" | "name" | "address">("recent")

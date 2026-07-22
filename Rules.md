@@ -1,6 +1,8 @@
 Rules.md
 
 
+Don't run npm run build ever. 
+
 
 
 Map Annotation/overlay stuff. 

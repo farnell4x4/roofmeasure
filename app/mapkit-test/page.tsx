@@ -2,6 +2,7 @@
 
 import { MapPin, Search } from "lucide-react"
 import {
+  ChangeEvent,
   FormEvent,
   PointerEvent as ReactPointerEvent,
   Suspense,
@@ -50,6 +51,7 @@ import {
   getProjectCalculationBreakdown,
 } from "@/lib/measurement/calculations"
 import { detectRoofPlanes } from "@/lib/measurement/plane-detection"
+import { createImageProject, readImageDimensions } from "@/lib/image-projects/factory"
 import { AddressSuggestion } from "@/types/mapkit"
 import {
   EditableMeasurementPoint as MeasurementPoint,
@@ -311,6 +313,7 @@ function MapKitTestPage() {
   const projectId = searchParams.get("projectId")
   const newProjectRequested = searchParams.get("new") === "1"
   const mapViewportRef = useRef<HTMLDivElement | null>(null)
+  const imageUploadInputRef = useRef<HTMLInputElement | null>(null)
   const mapRef = useRef<HTMLDivElement | null>(null)
   const mapInstanceRef = useRef<InstanceType<
     NonNullable<NonNullable<Window["mapkit"]>["Map"]>
@@ -400,6 +403,7 @@ function MapKitTestPage() {
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null)
   const [projectHydrated, setProjectHydrated] = useState(false)
   const [hasPersistedMapCamera, setHasPersistedMapCamera] = useState(false)
+  const [isSatelliteMapActive, setIsSatelliteMapActive] = useState(false)
   const [measurementSegments, setMeasurementSegments] = useState<
     MeasurementSegment[]
   >([])
@@ -524,6 +528,7 @@ function MapKitTestPage() {
         setActiveSinglePitch("6/12")
         setQuery("")
         setSelectedPlace(null)
+        setIsSatelliteMapActive(false)
         setHasPersistedMapCamera(false)
         replaceMeasurementGeometry({ segments: [], pendingLineStart: null })
         setIsComeFromArmed(false)
@@ -698,6 +703,7 @@ function MapKitTestPage() {
       setPointActionMenu(null)
       setPlanePitchMenu(null)
       resetSuperZoom()
+      setIsSatelliteMapActive(false)
       setSelectedPlace(
         project.location
           ? {
@@ -975,6 +981,7 @@ function MapKitTestPage() {
 
   function prepareForAddressSelection() {
     resetSuperZoom()
+    setIsSatelliteMapActive(false)
     mapCameraRef.current = null
     pendingMapCameraRestoreRef.current = null
     setHasPersistedMapCamera(false)
@@ -2206,6 +2213,7 @@ function MapKitTestPage() {
         )?.MapTypes?.Satellite ??
         mapkit.MapType?.Satellite ??
         map.mapType
+      setIsSatelliteMapActive(true)
     }, 250)
   }
 
@@ -2362,6 +2370,25 @@ function MapKitTestPage() {
       setSearchState("error")
       setSearchMessage(
         error instanceof Error ? error.message : "Address lookup failed.",
+      )
+    }
+  }
+
+  async function handleImageUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ""
+    if (!file || !file.type.startsWith("image/")) return
+
+    try {
+      const { width, height } = await readImageDimensions(file)
+      const imageProject = await db.saveImageProject(
+        createImageProject(file, width, height),
+      )
+      router.push(`/image?projectId=${encodeURIComponent(imageProject.id)}`)
+    } catch (error) {
+      setSearchState("error")
+      setSearchMessage(
+        error instanceof Error ? error.message : "Could not open this image.",
       )
     }
   }
@@ -2625,6 +2652,13 @@ function MapKitTestPage() {
         background: "#d9ddd8",
       }}
     >
+      <input
+        ref={imageUploadInputRef}
+        className="sr-only"
+        type="file"
+        accept="image/*"
+        onChange={(event) => void handleImageUpload(event)}
+      />
       <form
         onSubmit={handleSearchSubmit}
         style={{
@@ -2753,7 +2787,7 @@ function MapKitTestPage() {
           />
         </div>
         <div style={{ display: "grid", justifyItems: "start", gap: 4 }}>
-          <label
+          {isSatelliteMapActive ? <label
             style={{
               display: "flex",
               alignItems: "center",
@@ -2788,7 +2822,7 @@ function MapKitTestPage() {
               }}
               style={{ flex: 1, minWidth: 0, accentColor: "#1f2522" }}
             />
-          </label>
+          </label> : null}
           <button
             type="button"
             onClick={() => setIsMeasurementSettingsOpen((current) => !current)}
@@ -2804,7 +2838,7 @@ function MapKitTestPage() {
               cursor: "pointer",
             }}
           >
-            Settings
+            Options
           </button>
           {isMeasurementSettingsOpen ? (
             <div
@@ -2819,6 +2853,20 @@ function MapKitTestPage() {
                 boxShadow: "0 14px 50px rgba(20, 24, 22, 0.16)",
               }}
             >
+              <button
+                type="button"
+                onClick={() => imageUploadInputRef.current?.click()}
+                style={{
+                  border: 0,
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  background: "rgba(31, 37, 34, 0.08)",
+                  color: "#1f2522",
+                  cursor: "pointer",
+                }}
+              >
+                Upload Image
+              </button>
               <button
                 type="button"
                 onClick={() => router.push("/projects")}

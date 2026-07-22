@@ -5,6 +5,7 @@ import { ChangeEvent, PointerEvent as ReactPointerEvent, Suspense, useCallback, 
 import { useRouter, useSearchParams } from "next/navigation"
 import { db } from "@/lib/persistence/db"
 import { detectImageRoofPlanes } from "@/lib/image-projects/plane-detection"
+import { createImageProject, readImageDimensions } from "@/lib/image-projects/factory"
 import { MEASUREMENT_TYPES } from "@/lib/measurement/constants"
 import { roundMeasurement } from "@/lib/measurement/rounding"
 import type { MeasurementType } from "@/types/models"
@@ -15,29 +16,11 @@ type PointMenu = { point: ImagePoint; anchor: Anchor }
 type LineMenu = { segmentId: string; anchor: Anchor }
 type PitchMenu = { planeId: string; anchor: Anchor; draft: string }
 type ImageBounds = { left: number; top: number; width: number; height: number }
+type ImageZoom = { scale: number; offsetX: number; offsetY: number }
 
 const buttonStyle = { border: 0, borderRadius: 12, padding: "10px 12px", cursor: "pointer" } as const
 const popupStyle = { zIndex: 5, display: "grid", gap: 8, width: 160, padding: 12, borderRadius: 16, background: "rgba(255,255,255,.97)", border: "1px solid rgba(31,37,34,.12)", boxShadow: "0 14px 50px rgba(20,24,22,.16)" } as const
-
-function createImageProject(file: File, width: number, height: number): ImageProject {
-  const now = new Date().toISOString()
-  return {
-    id: crypto.randomUUID(), schemaVersion: 1, kind: "image", name: file.name.replace(/\.[^.]+$/, "") || "Roof photo",
-    image: file, imageName: file.name, imageWidth: width, imageHeight: height,
-    segments: [], pendingLineStart: null, planes: [], singlePitch: "6/12",
-    createdAt: now, updatedAt: now, lastOpenedAt: now,
-  }
-}
-
-function readImageDimensions(file: File) {
-  return new Promise<{ width: number; height: number }>((resolve, reject) => {
-    const image = new Image()
-    const source = URL.createObjectURL(file)
-    image.onload = () => { URL.revokeObjectURL(source); resolve({ width: image.naturalWidth, height: image.naturalHeight }) }
-    image.onerror = () => { URL.revokeObjectURL(source); reject(new Error("The selected file could not be read as an image.")) }
-    image.src = source
-  })
-}
+const MAX_IMAGE_ZOOM = 5
 
 function labelForLength(length: number, type?: MeasurementType) {
   if (!Number.isFinite(length) || length <= 0) return "Set ft"
@@ -58,6 +41,11 @@ function ImageProjectScreen() {
   const imageProjectRef = useRef<ImageProject | null>(null)
   const saveChain = useRef(Promise.resolve())
   const pointDrag = useRef<{ pointerId: number; key: string } | null>(null)
+  const imageZoomRef = useRef<ImageZoom>({ scale: 1, offsetX: 0, offsetY: 0 })
+  const canvasPointers = useRef(new Map<number, { x: number; y: number }>())
+  const canvasGesture = useRef<{ distance: number; startScale: number; baseMidpoint: { x: number; y: number } } | null>(null)
+  const canvasPan = useRef<{ pointerId: number; x: number; y: number; offsetX: number; offsetY: number; moved: boolean } | null>(null)
+  const ignoreNextStageClick = useRef(false)
   const [project, setProject] = useState<ImageProject | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 })
@@ -69,6 +57,7 @@ function ImageProjectScreen() {
   const [pitchMenu, setPitchMenu] = useState<PitchMenu | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [comeFromArmed, setComeFromArmed] = useState(false)
+  const [imageZoom, setImageZoom] = useState<ImageZoom>({ scale: 1, offsetX: 0, offsetY: 0 })
 
   const setStage = useCallback((node: HTMLDivElement | null) => {
     stageRef.current = node
@@ -132,6 +121,23 @@ function ImageProjectScreen() {
   function updateSegments(segments: ImageMeasurementSegment[], pendingLineStart?: ImagePoint | null) {
     update((current) => ({ ...current, segments, pendingLineStart: pendingLineStart === undefined ? current.pendingLineStart : pendingLineStart, planes: detectImageRoofPlanes(segments, current.planes) }))
   }
+  function setZoom(next: ImageZoom) {
+    const clampedScale = Math.min(MAX_IMAGE_ZOOM, Math.max(1, next.scale))
+    const stage = stageRef.current
+    const maxOffsetX = stage ? (stage.clientWidth * (clampedScale - 1)) / 2 : 0
+    const maxOffsetY = stage ? (stage.clientHeight * (clampedScale - 1)) / 2 : 0
+    const normalized = {
+      scale: clampedScale,
+      offsetX: Math.max(-maxOffsetX, Math.min(maxOffsetX, next.offsetX)),
+      offsetY: Math.max(-maxOffsetY, Math.min(maxOffsetY, next.offsetY)),
+    }
+    imageZoomRef.current = normalized
+    setImageZoom(normalized)
+  }
+  function stageRelativePoint(event: { clientX: number; clientY: number }) {
+    const rect = stageRef.current?.getBoundingClientRect()
+    return rect ? { x: event.clientX - rect.left, y: event.clientY - rect.top } : null
+  }
   function stagePoint(event: { clientX: number; clientY: number }) {
     const stage = stageRef.current
     if (!project || !stage) return null
@@ -143,8 +149,11 @@ function ImageProjectScreen() {
       width: project.imageWidth * scale,
       height: project.imageHeight * scale,
     }
-    const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
+    const visualX = event.clientX - rect.left
+    const visualY = event.clientY - rect.top
+    const zoom = imageZoomRef.current
+    const x = rect.width / 2 + (visualX - zoom.offsetX - rect.width / 2) / zoom.scale
+    const y = rect.height / 2 + (visualY - zoom.offsetY - rect.height / 2) / zoom.scale
     if (x < bounds.left || x > bounds.left + bounds.width || y < bounds.top || y > bounds.top + bounds.height) return null
     return { x: ((x - bounds.left) / bounds.width) * project.imageWidth, y: ((y - bounds.top) / bounds.height) * project.imageHeight }
   }
@@ -160,6 +169,7 @@ function ImageProjectScreen() {
     readImageDimensions(file).then(({ width, height }) => db.saveImageProject(createImageProject(file, width, height))).then((saved) => router.replace(`/image?projectId=${saved.id}`)).catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Could not create photo project."))
   }
   function handleStageClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (ignoreNextStageClick.current) { ignoreNextStageClick.current = false; return }
     const current = imageProjectRef.current
     if (!current || decision) return
     const point = stagePoint(event)
@@ -172,6 +182,67 @@ function ImageProjectScreen() {
       return
     }
     setDecision({ point, anchor: { x: event.clientX, y: event.clientY } })
+  }
+  function handleCanvasPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const point = stageRelativePoint(event)
+    if (!point || event.target !== event.currentTarget) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    canvasPointers.current.set(event.pointerId, point)
+    if (canvasPointers.current.size === 2) {
+      const [first, second] = [...canvasPointers.current.values()]
+      const distance = Math.hypot(second.x - first.x, second.y - first.y)
+      const midpoint = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
+      const zoom = imageZoomRef.current
+      const stage = stageRef.current
+      if (!stage || distance === 0) return
+      canvasGesture.current = {
+        distance,
+        startScale: zoom.scale,
+        baseMidpoint: {
+          x: stage.clientWidth / 2 + (midpoint.x - zoom.offsetX - stage.clientWidth / 2) / zoom.scale,
+          y: stage.clientHeight / 2 + (midpoint.y - zoom.offsetY - stage.clientHeight / 2) / zoom.scale,
+        },
+      }
+      canvasPan.current = null
+      ignoreNextStageClick.current = true
+      return
+    }
+    if (imageZoomRef.current.scale > 1) {
+      const zoom = imageZoomRef.current
+      canvasPan.current = { pointerId: event.pointerId, x: point.x, y: point.y, offsetX: zoom.offsetX, offsetY: zoom.offsetY, moved: false }
+    }
+  }
+  function handleCanvasPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const point = stageRelativePoint(event)
+    if (!point || !canvasPointers.current.has(event.pointerId)) return
+    canvasPointers.current.set(event.pointerId, point)
+    const stage = stageRef.current
+    const gesture = canvasGesture.current
+    if (stage && gesture && canvasPointers.current.size >= 2) {
+      const [first, second] = [...canvasPointers.current.values()]
+      const distance = Math.hypot(second.x - first.x, second.y - first.y)
+      if (distance === 0) return
+      const midpoint = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
+      const scale = Math.min(MAX_IMAGE_ZOOM, Math.max(1, (distance / gesture.distance) * gesture.startScale))
+      setZoom({
+        scale,
+        offsetX: midpoint.x - stage.clientWidth / 2 - (gesture.baseMidpoint.x - stage.clientWidth / 2) * scale,
+        offsetY: midpoint.y - stage.clientHeight / 2 - (gesture.baseMidpoint.y - stage.clientHeight / 2) * scale,
+      })
+      return
+    }
+    const pan = canvasPan.current
+    if (!pan || pan.pointerId !== event.pointerId) return
+    const deltaX = point.x - pan.x
+    const deltaY = point.y - pan.y
+    if (Math.hypot(deltaX, deltaY) > 3) { pan.moved = true; ignoreNextStageClick.current = true }
+    setZoom({ ...imageZoomRef.current, offsetX: pan.offsetX + deltaX, offsetY: pan.offsetY + deltaY })
+  }
+  function handleCanvasPointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    canvasPointers.current.delete(event.pointerId)
+    if (canvasPointers.current.size < 2) canvasGesture.current = null
+    if (canvasPan.current?.pointerId === event.pointerId) canvasPan.current = null
   }
   function applyDecision(mode: "continue" | "new") {
     const current = imageProjectRef.current
@@ -207,10 +278,12 @@ function ImageProjectScreen() {
       <button type="button" onClick={() => setSettingsOpen((open) => !open)} style={{ ...buttonStyle, justifySelf: "start", display: "flex", alignItems: "center", gap: 7, background: "rgba(255,255,255,.94)" }}><Settings size={16}/> Settings</button>
       {settingsOpen ? <div style={{ ...popupStyle, width: 190 }}><button type="button" onClick={() => router.push("/projects")} style={{ ...buttonStyle, background: "rgba(31,37,34,.08)" }}>Projects</button><label style={{ ...buttonStyle, background: "rgba(31,37,34,.08)", textAlign: "center" }}><input className="sr-only" type="file" accept="image/*" onChange={choosePhoto}/>Replace image</label></div> : null}
     </div>
-    <div ref={setStage} onClick={handleStageClick} style={{ position: "absolute", inset: 0, overflow: "hidden", touchAction: "none", cursor: "crosshair" }}>
+    <div ref={setStage} onClick={handleStageClick} onPointerDown={handleCanvasPointerDown} onPointerMove={handleCanvasPointerMove} onPointerUp={handleCanvasPointerEnd} onPointerCancel={handleCanvasPointerEnd} style={{ position: "absolute", inset: 0, overflow: "hidden", touchAction: "none", cursor: imageZoom.scale > 1 ? "grab" : "crosshair" }}>
+      <div style={{ position: "absolute", inset: 0, transform: `translate(${imageZoom.offsetX}px, ${imageZoom.offsetY}px) scale(${imageZoom.scale})`, transformOrigin: "center", pointerEvents: "none" }}>
       <img src={imageUrl} alt="Roof to measure" draggable={false} style={{ position: "absolute", inset: 0, zIndex: 0, width: "100%", height: "100%", objectFit: "contain", userSelect: "none", pointerEvents: "none" }}/>
       {imageBounds ? <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none", overflow: "visible" }}>{renderedPlanes.map((plane) => { const center = plane.points.reduce((sum, point) => ({ x: sum.x + point.x / plane.points.length, y: sum.y + point.y / plane.points.length }), { x: 0, y: 0 }); return <g key={plane.id}><polygon points={plane.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="rgba(40,128,255,.5)" stroke="rgba(22,91,196,.9)" strokeWidth="2"/><text x={center.x} y={center.y} fill="#fff" stroke="#000" strokeWidth="3" paintOrder="stroke" textAnchor="middle" dominantBaseline="central" fontSize="10" fontWeight="800" style={{ pointerEvents: "auto", cursor: "pointer" }} onClick={(event) => { event.stopPropagation(); setPitchMenu({ planeId: plane.id, anchor: { x: event.clientX, y: event.clientY }, draft: plane.pitch?.replace(/\/12$/, "") ?? "" }) }}>{plane.pitch?.replace(/12$/, "") ?? "?/12"}</text></g> })}{project.segments.map((segment) => { const start = visualPoint(segment.start); const end = visualPoint(segment.end); if (!start || !end) return null; const dx = end.x-start.x, dy=end.y-start.y, length=Math.hypot(dx,dy)||1; return <g key={segment.id}><line x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#e0b93b" strokeWidth="3" strokeLinecap="round" strokeDasharray="6 6"/><text x={(start.x+end.x)/2+(-dy/length)*17} y={(start.y+end.y)/2+(dx/length)*17} fill="#ffff00" stroke="#000" strokeWidth="3" paintOrder="stroke" textAnchor="middle" fontSize="10" fontWeight="700" style={{ pointerEvents: "auto", cursor: "pointer" }} onClick={(event) => { event.stopPropagation(); setLineMenu({ segmentId: segment.id, anchor: { x: event.clientX, y: event.clientY } }) }}>{labelForLength(segment.lengthFeet, segment.type)}</text></g> })}</svg> : null}
-      {[...pointMap.entries()].map(([key, point]) => { const visual = visualPoint(point); if (!visual) return null; const pending = project.pendingLineStart && imagePointKey(project.pendingLineStart) === key; return <button key={key} type="button" aria-label="Move measurement point" onClick={(event) => openPointMenu(event, point)} onPointerDown={(event) => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); pointDrag.current = { pointerId: event.pointerId, key } }} onPointerMove={movePoint} onPointerUp={(event) => { if (pointDrag.current?.pointerId === event.pointerId) { event.currentTarget.releasePointerCapture(event.pointerId); pointDrag.current = null } }} onPointerCancel={() => { pointDrag.current = null }} style={{ position: "absolute", zIndex: 2, left: visual.x, top: visual.y, width: 28, height: 28, transform: "translate(-50%,-50%)", border: 0, borderRadius: 999, background: "transparent", cursor: "grab", touchAction: "none", display: "grid", placeItems: "center" }}><span style={{ width: 10, height: 10, borderRadius: 999, border: pending ? "2px solid #1f2522" : "2px solid rgba(255,255,255,.95)", background: pending ? "#fff" : "#1f2522", boxShadow: "0 6px 18px rgba(20,24,22,.22)" }}/></button> })}
+      {[...pointMap.entries()].map(([key, point]) => { const visual = visualPoint(point); if (!visual) return null; const pending = project.pendingLineStart && imagePointKey(project.pendingLineStart) === key; return <button key={key} type="button" aria-label="Move measurement point" onClick={(event) => openPointMenu(event, point)} onPointerDown={(event) => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); pointDrag.current = { pointerId: event.pointerId, key } }} onPointerMove={movePoint} onPointerUp={(event) => { if (pointDrag.current?.pointerId === event.pointerId) { event.currentTarget.releasePointerCapture(event.pointerId); pointDrag.current = null } }} onPointerCancel={() => { pointDrag.current = null }} style={{ position: "absolute", zIndex: 2, pointerEvents: "auto", left: visual.x, top: visual.y, width: 28, height: 28, transform: "translate(-50%,-50%)", border: 0, borderRadius: 999, background: "transparent", cursor: "grab", touchAction: "none", display: "grid", placeItems: "center" }}><span style={{ width: 10, height: 10, borderRadius: 999, border: pending ? "2px solid #1f2522" : "2px solid rgba(255,255,255,.95)", background: pending ? "#fff" : "#1f2522", boxShadow: "0 6px 18px rgba(20,24,22,.22)" }}/></button> })}
+      </div>
     </div>
     {decision ? <div style={{ ...popupStyle, position: "fixed", left: Math.min(decision.anchor.x + 16, window.innerWidth - 176), top: Math.min(decision.anchor.y + 16, window.innerHeight - 150) }}><button type="button" onClick={() => applyDecision("continue")} style={{ ...buttonStyle, background: "#1f2522", color: "#fff" }}>Continue</button><button type="button" onClick={() => applyDecision("new")} style={{ ...buttonStyle, background: "rgba(31,37,34,.08)" }}>Start New</button><button type="button" onClick={closeMenus} style={{ ...buttonStyle, padding: 4, background: "transparent", color: "#5f685f" }}>Close</button></div> : null}
     {pointMenu ? <div style={{ ...popupStyle, position: "fixed", left: Math.min(pointMenu.anchor.x + 16, window.innerWidth - 176), top: Math.min(pointMenu.anchor.y + 16, window.innerHeight - 176) }}><button type="button" onClick={() => comeTo(pointMenu.point)} style={{ ...buttonStyle, background: "#1f2522", color: "#fff" }}>Come To</button><button type="button" onClick={() => comeFrom(pointMenu.point)} style={{ ...buttonStyle, background: "rgba(31,37,34,.08)" }}>Come From</button><button type="button" onClick={() => deletePoint(pointMenu.point)} style={{ ...buttonStyle, background: "rgba(184,53,47,.1)", color: "#a62d27" }}>Delete</button></div> : null}

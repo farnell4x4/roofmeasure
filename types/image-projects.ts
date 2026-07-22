@@ -36,6 +36,9 @@ export type ImageProject = {
   lastOpenedAt: string
 }
 
+/** List views intentionally omit the image blob so browsing projects stays light. */
+export type ImageProjectListItem = Omit<ImageProject, "image">
+
 export function imagePointKey(point: ImagePoint) {
   return `${Math.round(point.x * 100) / 100}:${Math.round(point.y * 100) / 100}`
 }

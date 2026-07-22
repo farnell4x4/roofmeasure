@@ -1,15 +1,19 @@
 import { openDB } from "idb"
 import type { CachedReportPdf } from "@/lib/report/pdf"
 import { AppPreferences, Project, SCHEMA_VERSION } from "@/types/models"
-import { ImageProject } from "@/types/image-projects"
+import { ImageProject, ImageProjectListItem } from "@/types/image-projects"
 
 const DB_NAME = "roofmeasure-db"
-const DB_VERSION = 3
+const DB_VERSION = 4
 const PROJECTS_STORE = "projects"
 const PREFERENCES_STORE = "preferences"
 const RECOVERY_STORE = "recovery"
 const REPORT_PDFS_STORE = "report-pdfs"
 const IMAGE_PROJECTS_STORE = "image-projects"
+const IMAGE_ASSETS_STORE = "image-assets"
+
+type StoredImageProject = ImageProjectListItem & { image?: Blob }
+type ImageAsset = { id: string; image: Blob }
 
 type RecoveryEntry = {
   id: string
@@ -37,6 +41,9 @@ async function getDatabase() {
           keyPath: "id",
         })
         imageProjectStore.createIndex("updatedAt", "updatedAt")
+      }
+      if (oldVersion < 4) {
+        database.createObjectStore(IMAGE_ASSETS_STORE, { keyPath: "id" })
       }
     },
   })
@@ -128,22 +135,47 @@ export const db = {
   },
   async listImageProjects() {
     const database = await getDatabase()
-    const projects = (await database.getAll(IMAGE_PROJECTS_STORE)) as ImageProject[]
+    const projects = (await database.getAll(IMAGE_PROJECTS_STORE)) as StoredImageProject[]
     return projects.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
   },
   async getImageProject(id: string) {
     const database = await getDatabase()
-    return (await database.get(IMAGE_PROJECTS_STORE, id)) as ImageProject | undefined
+    const [storedProject, asset] = await Promise.all([
+      database.get(IMAGE_PROJECTS_STORE, id) as Promise<StoredImageProject | undefined>,
+      database.get(IMAGE_ASSETS_STORE, id) as Promise<ImageAsset | undefined>,
+    ])
+    if (!storedProject) return undefined
+    // Version 3 projects held the blob on the project record. Keep those
+    // readable and move them into the dedicated asset store on their next save.
+    const image = asset?.image ?? storedProject.image
+    return image ? { ...storedProject, image } : undefined
   },
   async saveImageProject(project: ImageProject) {
     const database = await getDatabase()
-    const payload = { ...project, updatedAt: new Date().toISOString() }
-    await database.put(IMAGE_PROJECTS_STORE, payload)
+    const payload: ImageProject = { ...project, updatedAt: new Date().toISOString() }
+    const { image, ...metadata } = payload
+    const transaction = database.transaction(
+      [IMAGE_PROJECTS_STORE, IMAGE_ASSETS_STORE],
+      "readwrite",
+    )
+    const assetStore = transaction.objectStore(IMAGE_ASSETS_STORE)
+    const existingAsset = await assetStore.get(project.id) as ImageAsset | undefined
+    if (!existingAsset) {
+      await assetStore.put({ id: project.id, image } satisfies ImageAsset)
+    }
+    await transaction.objectStore(IMAGE_PROJECTS_STORE).put(metadata)
+    await transaction.done
     return payload
   },
   async deleteImageProject(id: string) {
     const database = await getDatabase()
-    await database.delete(IMAGE_PROJECTS_STORE, id)
+    const transaction = database.transaction(
+      [IMAGE_PROJECTS_STORE, IMAGE_ASSETS_STORE],
+      "readwrite",
+    )
+    await transaction.objectStore(IMAGE_PROJECTS_STORE).delete(id)
+    await transaction.objectStore(IMAGE_ASSETS_STORE).delete(id)
+    await transaction.done
   },
   async getPreferences() {
     const database = await getDatabase()
