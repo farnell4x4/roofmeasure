@@ -13,6 +13,7 @@ import { AddressSuggestion } from "@/types/mapkit";
 
 type LocationPermission = PermissionState | "unsupported";
 const LOCATION_ALERT_DISMISSED_KEY = "roofmeasure.mapkit-test.location-alert-dismissed";
+const SEARCH_MAX_ZOOM_SPAN = 0.00005;
 type MeasurementPoint = { latitude: number; longitude: number };
 type MeasurementSegment = { id: string; start: MeasurementPoint; end: MeasurementPoint };
 type DecisionAnchor = { x: number; y: number };
@@ -292,123 +293,6 @@ export default function MapKitTestPage() {
     if (!mapkit || !map) return;
 
     clearMeasurementVisuals();
-    if (superZoomActive) return;
-
-    const pointAnnotations: unknown[] = [];
-    const lineOverlays: unknown[] = [];
-    const labelAnnotations: unknown[] = [];
-    const renderedPointKeys = new Set<string>();
-    const coordinateCtor = mapkit.Coordinate;
-    const annotationCtor = mapkit.Annotation;
-    const polylineCtor = mapkit.PolylineOverlay;
-    const styleCtor = mapkit.Style;
-    const activeMap = map;
-
-    function addPointMarker(point: MeasurementPoint, tone: "solid" | "pending") {
-      if (!annotationCtor) return;
-
-      const key = `${point.latitude.toFixed(7)}:${point.longitude.toFixed(7)}:${tone}`;
-      if (renderedPointKeys.has(key)) return;
-      renderedPointKeys.add(key);
-
-      const annotation = new annotationCtor(
-        new coordinateCtor(point.latitude, point.longitude),
-        () => {
-          const element = document.createElement("div");
-          element.style.width = tone === "pending" ? "16px" : "14px";
-          element.style.height = tone === "pending" ? "16px" : "14px";
-          element.style.borderRadius = "999px";
-          element.style.background = tone === "pending" ? "#ffffff" : "#1f2522";
-          element.style.border = tone === "pending" ? "3px solid #1f2522" : "3px solid rgba(255,255,255,0.95)";
-          element.style.boxShadow = "0 6px 18px rgba(20, 24, 22, 0.22)";
-          return element;
-        },
-        {
-          size: {
-            width: tone === "pending" ? 16 : 14,
-            height: tone === "pending" ? 16 : 14
-          }
-        }
-      );
-
-      activeMap.addAnnotation(annotation);
-      pointAnnotations.push(annotation);
-    }
-
-    measurementSegments.forEach((segment) => {
-      addPointMarker(segment.start, "solid");
-      addPointMarker(segment.end, "solid");
-
-      if (polylineCtor) {
-        const overlay = new polylineCtor(
-          [
-            new coordinateCtor(segment.start.latitude, segment.start.longitude),
-            new coordinateCtor(segment.end.latitude, segment.end.longitude)
-          ],
-          {
-            style: styleCtor
-              ? new styleCtor({
-                  strokeColor: "#1f2522",
-                  lineWidth: 4,
-                  lineCap: "round",
-                  lineJoin: "round"
-                })
-              : undefined
-          }
-        );
-        activeMap.addOverlay(overlay);
-        lineOverlays.push(overlay);
-      }
-
-      if (annotationCtor) {
-        const midpoint = {
-          latitude: (segment.start.latitude + segment.end.latitude) / 2,
-          longitude: (segment.start.longitude + segment.end.longitude) / 2
-        };
-        const segmentVector = {
-          x: segment.end.longitude - segment.start.longitude,
-          y: segment.end.latitude - segment.start.latitude
-        };
-        const segmentLength = Math.hypot(segmentVector.x, segmentVector.y) || 1;
-        const sideOffset = {
-          x: (-segmentVector.y / segmentLength) * 34,
-          y: (segmentVector.x / segmentLength) * 34
-        };
-        const distanceFeet = haversineDistanceFeet(
-          { lat: segment.start.latitude, lng: segment.start.longitude },
-          { lat: segment.end.latitude, lng: segment.end.longitude }
-        );
-        const label = `${Math.round(distanceFeet)}'`;
-        const labelAnnotation = new annotationCtor(
-          new coordinateCtor(midpoint.latitude, midpoint.longitude),
-          () => {
-            const element = document.createElement("div");
-            element.textContent = label;
-            element.style.color = "#ffffff";
-            element.style.fontSize = "15px";
-            element.style.fontWeight = "700";
-            element.style.whiteSpace = "nowrap";
-            element.style.textShadow =
-              "0 1px 0 #000, 1px 0 0 #000, 0 -1px 0 #000, -1px 0 0 #000, 1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000";
-            return element;
-          },
-          {
-            anchorOffset: new DOMPoint(sideOffset.x, sideOffset.y),
-            size: { width: 56, height: 20 }
-          }
-        );
-        activeMap.addAnnotation(labelAnnotation);
-        labelAnnotations.push(labelAnnotation);
-      }
-    });
-
-    if (pendingLineStart) {
-      addPointMarker(pendingLineStart, "pending");
-    }
-
-    measurementPointAnnotationRefs.current = pointAnnotations;
-    measurementLineOverlayRefs.current = lineOverlays;
-    measurementLabelAnnotationRefs.current = labelAnnotations;
   }
 
   const projectedMeasurementOverlay = useMemo(() => {
@@ -931,7 +815,7 @@ export default function MapKitTestPage() {
       }
 
       resetSuperZoom();
-      recenterMap(bestMatch.latitude, bestMatch.longitude, 0.003, 0.003);
+      recenterMap(bestMatch.latitude, bestMatch.longitude, SEARCH_MAX_ZOOM_SPAN, SEARCH_MAX_ZOOM_SPAN);
       switchMapToSatelliteAfterSearch();
       setSelectedPlace({
         latitude: bestMatch.latitude,
@@ -960,7 +844,7 @@ export default function MapKitTestPage() {
     try {
       if (typeof suggestion.latitude === "number" && typeof suggestion.longitude === "number" && !suggestion.mapkitResult) {
         resetSuperZoom();
-        recenterMap(suggestion.latitude, suggestion.longitude, 0.003, 0.003);
+        recenterMap(suggestion.latitude, suggestion.longitude, SEARCH_MAX_ZOOM_SPAN, SEARCH_MAX_ZOOM_SPAN);
         switchMapToSatelliteAfterSearch();
         setSelectedPlace({
           latitude: suggestion.latitude,
@@ -996,7 +880,7 @@ export default function MapKitTestPage() {
       }
 
       resetSuperZoom();
-      recenterMap(bestMatch.latitude, bestMatch.longitude, 0.003, 0.003);
+      recenterMap(bestMatch.latitude, bestMatch.longitude, SEARCH_MAX_ZOOM_SPAN, SEARCH_MAX_ZOOM_SPAN);
       switchMapToSatelliteAfterSearch();
       setSelectedPlace({
         latitude: bestMatch.latitude,
@@ -1523,7 +1407,7 @@ export default function MapKitTestPage() {
             }}
           />
         </div>
-        {superZoomActive ? (
+        {(measurementSegments.length > 0 || pendingLineStart) ? (
           <div
             style={{
               position: "absolute",

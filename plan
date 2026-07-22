@@ -45,3 +45,13 @@ Provide:
 * Zoom-safe overlays
 * Human-readable feet and inches, with optional decimal feet
 
+Super Zoom coordinate/render fix [completed]
+
+Fix:
+* Keep two separate rules:
+* `tap/drag -> coordinate`: undo Super Zoom before `convertPointOnPageToCoordinate`
+* `coordinate -> dot/line/label`: project forward once for display
+
+Why:
+* Mixing those directions caused either wrong measurements or wrong visible placement.
+* Handing measurement rendering back to native MapKit at `1x` also caused overlays to disappear, so the projected DOM measurement layer now stays active at every zoom level, including `1x`.
