@@ -1,6 +1,6 @@
 "use client"
 
-import { FileText, FolderOpen, Plus, Trash2, Upload } from "lucide-react"
+import { FileImage, FileText, FolderOpen, MapPinned, Trash2, Upload } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/Button"
@@ -13,11 +13,14 @@ import { formatArea } from "@/lib/measurement/units"
 import { calculateProjectTotals } from "@/lib/measurement/calculations"
 import { useProjects } from "@/hooks/useProjects"
 import { appendPersistenceDebugNote } from "@/lib/debug/persistence-debug"
+import type { ImageProject } from "@/types/image-projects"
 
 export function ProjectsScreen() {
   const router = useRouter()
   const { push } = useToast()
   const { projects, isLoading, refresh } = useProjects()
+  const [imageProjects, setImageProjects] = useState<ImageProject[]>([])
+  const [imageProjectsLoading, setImageProjectsLoading] = useState(true)
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<"recent" | "name" | "address">("recent")
 
@@ -30,33 +33,45 @@ export function ProjectsScreen() {
     }
   }, [])
 
+  useEffect(() => {
+    db.listImageProjects()
+      .then(setImageProjects)
+      .finally(() => setImageProjectsLoading(false))
+  }, [])
+
+  async function refreshAllProjects() {
+    await Promise.all([refresh(), db.listImageProjects().then(setImageProjects)])
+  }
+
   const filtered = useMemo(() => {
     const normalizedQuery = query.toLowerCase()
-    const items = projects.filter((project) => {
-      const address = project.location?.formattedAddress ?? ""
+    const mapItems = projects.map((project) => ({ kind: "map" as const, project }))
+    const photoItems = imageProjects.map((project) => ({ kind: "image" as const, project }))
+    const items = [...mapItems, ...photoItems].filter(({ kind, project }) => {
+      const address = kind === "map" ? project.location?.formattedAddress ?? "" : ""
       return (
         project.name.toLowerCase().includes(normalizedQuery) ||
         address.toLowerCase().includes(normalizedQuery)
       )
     })
     if (sort === "name") {
-      return items.sort((left, right) => left.name.localeCompare(right.name))
+      return items.sort((left, right) => left.project.name.localeCompare(right.project.name))
     }
     if (sort === "address") {
-      return items.sort((left, right) =>
-        (left.location?.formattedAddress ?? "").localeCompare(
-          right.location?.formattedAddress ?? "",
-        ),
-      )
+      return items.sort((left, right) => {
+        const leftAddress = left.kind === "map" ? left.project.location?.formattedAddress ?? "" : ""
+        const rightAddress = right.kind === "map" ? right.project.location?.formattedAddress ?? "" : ""
+        return leftAddress.localeCompare(rightAddress)
+      })
     }
     return items
-  }, [projects, query, sort])
+  }, [imageProjects, projects, query, sort])
 
   async function handleDeleteProject(id: string) {
     if (!window.confirm("Delete this project from local storage?")) return
     await db.deleteProject(id)
     push({ title: "Project deleted.", tone: "success" })
-    await refresh()
+    await refreshAllProjects()
   }
 
   async function handleImportProject(
@@ -67,7 +82,7 @@ export function ProjectsScreen() {
     const text = await file.text()
     await db.importProject(text)
     push({ title: "Project imported.", tone: "success" })
-    await refresh()
+    await refreshAllProjects()
   }
 
   function handleOpenProject(project: (typeof projects)[number]) {
@@ -76,6 +91,13 @@ export function ProjectsScreen() {
       `SAVED PROJECT OPEN REQUESTED • ${project.name} (${project.id.slice(-8)}) • ${totals.segmentCount} segment(s)`,
     )
     router.push(`/?projectId=${project.id}`)
+  }
+
+  async function handleDeleteImageProject(id: string) {
+    if (!window.confirm("Delete this photo project from local storage?")) return
+    await db.deleteImageProject(id)
+    push({ title: "Photo project deleted.", tone: "success" })
+    await refreshAllProjects()
   }
 
   return (
@@ -89,9 +111,14 @@ export function ProjectsScreen() {
             measurement project.
           </p>
         </div>
-        <Button onClick={() => router.push("/?new=1")}>
-          <Plus size={18} /> New Project
-        </Button>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Button onClick={() => router.push("/?new=1")}>
+            <MapPinned size={18} /> New Map Project
+          </Button>
+          <Button variant="secondary" onClick={() => router.push("/image?new=1")}>
+            <FileImage size={18} /> Upload Roof Image
+          </Button>
+        </div>
       </section>
 
       <Card className="projects-screen__filters" style={{ display: "grid", gap: 12 }}>
@@ -137,35 +164,34 @@ export function ProjectsScreen() {
         </div>
       </Card>
 
-      {isLoading ? <Card>Loading projects…</Card> : null}
-      {!isLoading && filtered.length === 0 ? (
+      {isLoading || imageProjectsLoading ? <Card>Loading projects…</Card> : null}
+      {!isLoading && !imageProjectsLoading && filtered.length === 0 ? (
         <EmptyState
           title="No saved projects yet"
           description="Search an address from the measuring screen to create a saved local project. Imported projects also appear here."
           actionLabel="Start New Project"
-          onAction={() => router.push("/?new=1")}
+          onAction={() => router.push("/image?new=1")}
         />
       ) : null}
 
       <section className="projects-screen__list">
-        {filtered.map((project) => {
-          const totals = calculateProjectTotals(project)
+        {filtered.map(({ kind, project }) => {
+          const totals = kind === "map" ? calculateProjectTotals(project) : null
           return (
             <Card key={project.id} className="projects-screen__project" style={{ display: "grid", gap: 14 }}>
               <div className="projects-screen__project-header">
                 <div className="projects-screen__project-details">
                   <h2 style={{ margin: "0 0 4px" }}>{project.name}</h2>
                   <p style={{ margin: 0, color: "var(--muted)" }}>
-                    {project.location?.formattedAddress ??
-                      "Address not selected yet"}
+                    {kind === "image"
+                      ? `Roof image · ${project.imageName}`
+                      : project.location?.formattedAddress ?? "Address not selected yet"}
                   </p>
                 </div>
                 <span className="chip">
-                  {totals.segmentCount} segments •{" "}
-                  {formatArea(
-                    totals.totalSlopeAreaSqFt,
-                    project.preferences.unitSystem,
-                  )}
+                  {kind === "image"
+                    ? `${project.segments.length} annotated segments · photo`
+                    : `${totals!.segmentCount} segments • ${formatArea(totals!.totalSlopeAreaSqFt, project.preferences.unitSystem)}`}
                 </span>
               </div>
               <div
@@ -180,21 +206,16 @@ export function ProjectsScreen() {
                 <span>
                   Modified {new Date(project.updatedAt).toLocaleString()}
                 </span>
-                <span>{totals.planeCount} roof planes</span>
+                <span>{kind === "image" ? `${project.planes.length} roof planes` : `${totals!.planeCount} roof planes`}</span>
               </div>
               <div className="projects-screen__actions">
-                <Button onClick={() => handleOpenProject(project)}>
+                <Button onClick={() => kind === "image" ? router.push(`/image?projectId=${project.id}`) : handleOpenProject(project)}>
                   <FolderOpen size={18} /> Open
                 </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => router.push(`/report?projectId=${project.id}`)}
-                >
-                  <FileText size={18} /> View Report
-                </Button>
+                {kind === "map" ? <Button variant="secondary" onClick={() => router.push(`/report?projectId=${project.id}`)}><FileText size={18} /> View Report</Button> : null}
                 <Button
                   variant="danger"
-                  onClick={() => handleDeleteProject(project.id)}
+                  onClick={() => kind === "image" ? handleDeleteImageProject(project.id) : handleDeleteProject(project.id)}
                 >
                   <Trash2 size={18} /> Delete
                 </Button>

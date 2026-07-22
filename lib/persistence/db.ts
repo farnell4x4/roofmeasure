@@ -1,13 +1,15 @@
 import { openDB } from "idb"
 import type { CachedReportPdf } from "@/lib/report/pdf"
 import { AppPreferences, Project, SCHEMA_VERSION } from "@/types/models"
+import { ImageProject } from "@/types/image-projects"
 
 const DB_NAME = "roofmeasure-db"
-const DB_VERSION = 2
+const DB_VERSION = 3
 const PROJECTS_STORE = "projects"
 const PREFERENCES_STORE = "preferences"
 const RECOVERY_STORE = "recovery"
 const REPORT_PDFS_STORE = "report-pdfs"
+const IMAGE_PROJECTS_STORE = "image-projects"
 
 type RecoveryEntry = {
   id: string
@@ -29,6 +31,12 @@ async function getDatabase() {
       }
       if (oldVersion < 2) {
         database.createObjectStore(REPORT_PDFS_STORE, { keyPath: "projectId" })
+      }
+      if (oldVersion < 3) {
+        const imageProjectStore = database.createObjectStore(IMAGE_PROJECTS_STORE, {
+          keyPath: "id",
+        })
+        imageProjectStore.createIndex("updatedAt", "updatedAt")
       }
     },
   })
@@ -117,6 +125,25 @@ export const db = {
       id: crypto.randomUUID(),
       updatedAt: new Date().toISOString(),
     })
+  },
+  async listImageProjects() {
+    const database = await getDatabase()
+    const projects = (await database.getAll(IMAGE_PROJECTS_STORE)) as ImageProject[]
+    return projects.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+  },
+  async getImageProject(id: string) {
+    const database = await getDatabase()
+    return (await database.get(IMAGE_PROJECTS_STORE, id)) as ImageProject | undefined
+  },
+  async saveImageProject(project: ImageProject) {
+    const database = await getDatabase()
+    const payload = { ...project, updatedAt: new Date().toISOString() }
+    await database.put(IMAGE_PROJECTS_STORE, payload)
+    return payload
+  },
+  async deleteImageProject(id: string) {
+    const database = await getDatabase()
+    await database.delete(IMAGE_PROJECTS_STORE, id)
   },
   async getPreferences() {
     const database = await getDatabase()
