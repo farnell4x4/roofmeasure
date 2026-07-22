@@ -36,7 +36,7 @@ function toProjectLocation(address: Pick<AddressSuggestion, "title" | "subtitle"
   };
 }
 
-function toProjectMeasurementData(measurementSegments: MeasurementSegment[]) {
+function toProjectMeasurementData(measurementSegments: MeasurementSegment[], pendingLineStart?: MeasurementPoint | null) {
   const now = new Date().toISOString();
   const points = new Map<string, { id: string; lat: number; lng: number }>();
 
@@ -52,36 +52,45 @@ function toProjectMeasurementData(measurementSegments: MeasurementSegment[]) {
     return points.get(key)!;
   }
 
+  if (pendingLineStart) {
+    ensurePoint(pendingLineStart);
+  }
+
+  const segments = measurementSegments.map((segment) => {
+    const startPoint = ensurePoint(segment.start);
+    const endPoint = ensurePoint(segment.end);
+    return {
+      id: segment.id,
+      type: "eave" as const,
+      startPointId: startPoint.id,
+      endPointId: endPoint.id,
+      lengthFeet: haversineDistanceFeet(
+        { lat: segment.start.latitude, lng: segment.start.longitude },
+        { lat: segment.end.latitude, lng: segment.end.longitude }
+      ),
+      groupId: "mapkit-test",
+      createdAt: now,
+      updatedAt: now
+    };
+  });
+
   return {
     points: Array.from(points.values()),
-    segments: measurementSegments.map((segment) => {
-      const startPoint = ensurePoint(segment.start);
-      const endPoint = ensurePoint(segment.end);
-      return {
-        id: segment.id,
-        type: "eave" as const,
-        startPointId: startPoint.id,
-        endPointId: endPoint.id,
-        lengthFeet: haversineDistanceFeet(
-          { lat: segment.start.latitude, lng: segment.start.longitude },
-          { lat: segment.end.latitude, lng: segment.end.longitude }
-        ),
-        groupId: "mapkit-test",
-        createdAt: now,
-        updatedAt: now
-      };
-    })
+    segments
   };
 }
 
-function fromProjectMeasurementData(project: Project): MeasurementSegment[] {
+function fromProjectMeasurementData(project: Project) {
   const pointsById = new Map(project.points.map((point) => [point.id, point]));
+  const usedPointIds = new Set<string>();
 
-  return project.segments
+  const segments = project.segments
     .map((segment) => {
       const startPoint = pointsById.get(segment.startPointId);
       const endPoint = pointsById.get(segment.endPointId);
       if (!startPoint || !endPoint) return null;
+      usedPointIds.add(segment.startPointId);
+      usedPointIds.add(segment.endPointId);
       return {
         id: segment.id,
         start: {
@@ -95,6 +104,18 @@ function fromProjectMeasurementData(project: Project): MeasurementSegment[] {
       };
     })
     .filter((segment): segment is MeasurementSegment => Boolean(segment));
+
+  const orphanPoint = project.points.find((point) => !usedPointIds.has(point.id));
+
+  return {
+    segments,
+    pendingLineStart: orphanPoint
+      ? {
+          latitude: orphanPoint.lat,
+          longitude: orphanPoint.lng
+        }
+      : null
+  };
 }
 
 async function getLocationPermission(): Promise<LocationPermission> {
@@ -230,14 +251,15 @@ export default function MapKitTestPage() {
 
       const project = await db.getProject(projectId);
       if (!project || cancelled) return;
+      const measurementState = fromProjectMeasurementData(project);
 
       hydratedProjectIdRef.current = projectId;
       currentProjectIdRef.current = project.id;
       setCurrentProjectId(project.id);
       setQuery(project.location?.formattedAddress ?? project.name);
       setSuppressSuggestionsUntilTyping(Boolean(project.location));
-      setMeasurementSegments(fromProjectMeasurementData(project));
-      setPendingLineStart(null);
+      setMeasurementSegments(measurementState.segments);
+      setPendingLineStart(measurementState.pendingLineStart);
       setPendingModeDecisionPoint(null);
       setPendingModeDecisionAnchor(null);
       resetSuperZoom();
@@ -343,8 +365,13 @@ export default function MapKitTestPage() {
   async function saveProjectSnapshot(options?: {
     projectName?: string;
     location?: PropertyLocation | null;
+    measurementSegments?: MeasurementSegment[];
+    pendingLineStart?: MeasurementPoint | null;
   }) {
-    const geometry = toProjectMeasurementData(measurementSegments);
+    const geometry = toProjectMeasurementData(
+      options?.measurementSegments ?? measurementSegments,
+      options?.pendingLineStart ?? pendingLineStart
+    );
     const existingProject =
       currentProjectIdRef.current ? await db.getProject(currentProjectIdRef.current) : undefined;
     const projectName =
@@ -949,6 +976,7 @@ export default function MapKitTestPage() {
   useEffect(() => {
     if (!mapReady || !selectedPlace) return;
     recenterMap(selectedPlace.latitude, selectedPlace.longitude, SEARCH_MAX_ZOOM_SPAN, SEARCH_MAX_ZOOM_SPAN);
+    switchMapToSatelliteAfterSearch();
   }, [mapReady, selectedPlace]);
 
   useEffect(() => {
@@ -989,7 +1017,7 @@ export default function MapKitTestPage() {
   useEffect(() => {
     if (!currentProjectId) return;
     void saveProjectSnapshot().catch(() => undefined);
-  }, [currentProjectId, measurementSegments]);
+  }, [currentProjectId, measurementSegments, pendingLineStart]);
 
   async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1026,7 +1054,6 @@ export default function MapKitTestPage() {
 
       const location = toProjectLocation(bestMatch);
       resetSuperZoom();
-      switchMapToSatelliteAfterSearch();
       setSelectedPlace({
         latitude: bestMatch.latitude,
         longitude: bestMatch.longitude
@@ -1034,7 +1061,8 @@ export default function MapKitTestPage() {
       setQuery(location.formattedAddress);
       await saveProjectSnapshot({
         projectName: location.formattedAddress,
-        location
+        location,
+        measurementSegments: []
       });
       setSuppressSuggestionsUntilTyping(true);
       resetMeasurementSession();
@@ -1060,7 +1088,6 @@ export default function MapKitTestPage() {
       if (typeof suggestion.latitude === "number" && typeof suggestion.longitude === "number" && !suggestion.mapkitResult) {
         const location = toProjectLocation(suggestion);
         resetSuperZoom();
-        switchMapToSatelliteAfterSearch();
         setSelectedPlace({
           latitude: suggestion.latitude,
           longitude: suggestion.longitude
@@ -1068,7 +1095,8 @@ export default function MapKitTestPage() {
         setQuery(location.formattedAddress);
         await saveProjectSnapshot({
           projectName: location.formattedAddress,
-          location
+          location,
+          measurementSegments: []
         });
         setSuppressSuggestionsUntilTyping(true);
         resetMeasurementSession();
@@ -1101,7 +1129,6 @@ export default function MapKitTestPage() {
 
       const location = toProjectLocation(bestMatch);
       resetSuperZoom();
-      switchMapToSatelliteAfterSearch();
       setSelectedPlace({
         latitude: bestMatch.latitude,
         longitude: bestMatch.longitude
@@ -1109,7 +1136,8 @@ export default function MapKitTestPage() {
       setQuery(location.formattedAddress);
       await saveProjectSnapshot({
         projectName: location.formattedAddress,
-        location
+        location,
+        measurementSegments: []
       });
       setSuppressSuggestionsUntilTyping(true);
       resetMeasurementSession();
@@ -1520,6 +1548,20 @@ export default function MapKitTestPage() {
                 );
               })}
             </div>
+            <button
+              type="button"
+              onClick={() => router.push("/projects")}
+              style={{
+                border: 0,
+                borderRadius: 12,
+                padding: "10px 12px",
+                background: "rgba(31, 37, 34, 0.08)",
+                color: "#1f2522",
+                cursor: "pointer"
+              }}
+            >
+              Projects
+            </button>
             <button
               type="button"
               onClick={resetSuperZoom}
