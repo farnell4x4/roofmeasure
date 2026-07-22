@@ -1,11 +1,13 @@
 import { openDB } from "idb"
+import type { CachedReportPdf } from "@/lib/report/pdf"
 import { AppPreferences, Project, SCHEMA_VERSION } from "@/types/models"
 
 const DB_NAME = "roofmeasure-db"
-const DB_VERSION = 1
+const DB_VERSION = 2
 const PROJECTS_STORE = "projects"
 const PREFERENCES_STORE = "preferences"
 const RECOVERY_STORE = "recovery"
+const REPORT_PDFS_STORE = "report-pdfs"
 
 type RecoveryEntry = {
   id: string
@@ -24,6 +26,9 @@ async function getDatabase() {
         projectStore.createIndex("updatedAt", "updatedAt")
         database.createObjectStore(PREFERENCES_STORE, { keyPath: "id" })
         database.createObjectStore(RECOVERY_STORE, { keyPath: "id" })
+      }
+      if (oldVersion < 2) {
+        database.createObjectStore(REPORT_PDFS_STORE, { keyPath: "projectId" })
       }
     },
   })
@@ -65,7 +70,7 @@ export const db = {
       updatedAt: new Date().toISOString(),
     }
     const transaction = database.transaction(
-      [PROJECTS_STORE, RECOVERY_STORE],
+      [PROJECTS_STORE, RECOVERY_STORE, REPORT_PDFS_STORE],
       "readwrite",
     )
     await transaction.objectStore(PROJECTS_STORE).put(payload)
@@ -75,17 +80,19 @@ export const db = {
       project: payload,
       savedAt: payload.updatedAt,
     } satisfies RecoveryEntry)
+    await transaction.objectStore(REPORT_PDFS_STORE).delete(project.id)
     await transaction.done
     return payload
   },
   async deleteProject(id: string) {
     const database = await getDatabase()
     const transaction = database.transaction(
-      [PROJECTS_STORE, RECOVERY_STORE],
+      [PROJECTS_STORE, RECOVERY_STORE, REPORT_PDFS_STORE],
       "readwrite",
     )
     await transaction.objectStore(PROJECTS_STORE).delete(id)
     await transaction.objectStore(RECOVERY_STORE).delete(id)
+    await transaction.objectStore(REPORT_PDFS_STORE).delete(id)
     await transaction.done
   },
   async duplicateProject(project: Project) {
@@ -124,5 +131,16 @@ export const db = {
     const database = await getDatabase()
     return (await database.get(RECOVERY_STORE, projectId)) as
       RecoveryEntry | undefined
+  },
+  async getReportPdf(projectId: string, fingerprint: string) {
+    const database = await getDatabase()
+    const cached = (await database.get(REPORT_PDFS_STORE, projectId)) as
+      | (CachedReportPdf & { projectId: string })
+      | undefined
+    return cached?.fingerprint === fingerprint ? cached : undefined
+  },
+  async saveReportPdf(projectId: string, report: CachedReportPdf) {
+    const database = await getDatabase()
+    await database.put(REPORT_PDFS_STORE, { projectId, ...report })
   },
 }

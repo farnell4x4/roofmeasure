@@ -225,7 +225,7 @@ body.report-page-active {
   position: fixed;
   top: 50%;
   left: 50%;
-  z-index: 0;
+  z-index: 2;
   width: 125vw;
   transform: translate(-50%, -50%) rotate(-34deg);
   color: rgba(65, 105, 225, 0.12);
@@ -412,10 +412,22 @@ body.report-page-active {
   color: #fff;
 }
 
+.report-button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
 .report-download-note {
   display: block;
   margin-top: 10px;
   color: #6a7280;
+  font-size: 12px;
+  text-align: right;
+}
+
+.report-action-message {
+  margin: 10px 0 0;
+  color: #a13f2d;
   font-size: 12px;
   text-align: right;
 }

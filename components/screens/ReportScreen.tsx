@@ -5,30 +5,40 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { db } from "@/lib/persistence/db"
 import { calculateProjectTotals } from "@/lib/measurement/calculations"
 import { formatArea, formatLength } from "@/lib/measurement/units"
-import { MeasurementType, Project } from "@/types/models"
+import {
+  buildReportPdfFingerprint,
+  createCachedReportPdf,
+  REPORT_LINE_TYPES,
+  reportTimestamp,
+} from "@/lib/report/pdf"
+import type { Project } from "@/types/models"
 
-const REPORT_LINE_TYPES: Array<{ type: MeasurementType; label: string }> = [
-  { type: "ridge", label: "Ridge" },
-  { type: "hip", label: "Hip" },
-  { type: "valley", label: "Valley" },
-  { type: "rake", label: "Rake" },
-  { type: "eave", label: "Eave" },
-  { type: "wall", label: "Wall" },
-]
+type ReportPdfState =
+  | { status: "preparing" }
+  | { status: "ready"; file: File; generatedAt: string }
+  | { status: "error"; message: string }
 
-function reportTimestamp(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value))
+function isShareSupported(file: File) {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
+    return false
+  }
+  try {
+    return typeof navigator.canShare !== "function" || navigator.canShare({ files: [file] })
+  } catch {
+    return false
+  }
 }
 
-function downloadName(project: Project) {
-  const name = (project.location?.formattedAddress ?? project.name)
-    .replace(/[^a-z0-9]+/gi, "-")
-    .replace(/^-|-$/g, "")
-    .toLowerCase()
-  return `${name || "roof-report"}.pdf`
+function downloadFile(file: File) {
+  const url = URL.createObjectURL(file)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = file.name
+  anchor.style.display = "none"
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
 }
 
 export function ReportScreen() {
@@ -37,6 +47,9 @@ export function ReportScreen() {
   const [project, setProject] = useState<Project | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [generatedAt] = useState(() => new Date().toISOString())
+  const [pdfState, setPdfState] = useState<ReportPdfState>({ status: "preparing" })
+  const [canShareReport, setCanShareReport] = useState(false)
+  const [shareMessage, setShareMessage] = useState<string | null>(null)
 
   useEffect(() => {
     document.documentElement.classList.add("report-page-active")
@@ -70,21 +83,67 @@ export function ReportScreen() {
     [project],
   )
 
+  useEffect(() => {
+    let cancelled = false
+
+    if (!project || !totals) {
+      setPdfState({ status: "preparing" })
+      setCanShareReport(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const fingerprint = buildReportPdfFingerprint(project, totals)
+    setPdfState({ status: "preparing" })
+    setCanShareReport(false)
+    setShareMessage(null)
+
+    void (async () => {
+      try {
+        const cached = await db.getReportPdf(project.id, fingerprint)
+        const report = cached ?? await createCachedReportPdf(project, totals)
+        if (!cached) await db.saveReportPdf(project.id, report)
+        if (cancelled) return
+
+        const file = new File([report.pdf], report.filename, {
+          type: "application/pdf",
+          lastModified: new Date(report.generatedAt).getTime(),
+        })
+        setPdfState({ status: "ready", file, generatedAt: report.generatedAt })
+        setCanShareReport(isShareSupported(file))
+      } catch {
+        if (!cancelled) {
+          setPdfState({
+            status: "error",
+            message: "Could not prepare the PDF. You can still print this report.",
+          })
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [project, totals])
+
   function printReport() {
     window.print()
   }
 
-  function emailReport() {
-    if (!project || !totals) return
-    const subject = `Roof report — ${project.location?.formattedAddress ?? project.name}`
-    const body = [
-      `Roof report for ${project.location?.formattedAddress ?? project.name}`,
-      `Roofing area: ${formatArea(totals.totalSlopeAreaSqFt, project.preferences.unitSystem)}`,
-      `Roofing squares: ${totals.totalSquares.toFixed(2)}`,
-      "",
-      "Double check all measurements for accuracy.",
-    ].join("\n")
-    window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  async function shareReport() {
+    if (pdfState.status !== "ready" || !project) return
+    setShareMessage(null)
+
+    try {
+      await navigator.share({
+        title: `Roof report - ${project.location?.formattedAddress ?? project.name}`,
+        files: [pdfState.file],
+      })
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return
+      setShareMessage("Could not open sharing. Download the PDF instead.")
+    }
   }
 
   if (isLoading) {
@@ -119,7 +178,7 @@ export function ReportScreen() {
           </div>
           <div className="report-timestamp">
             <span>Generated</span>
-            <strong>{reportTimestamp(generatedAt)}</strong>
+            <strong>{reportTimestamp(pdfState.status === "ready" ? pdfState.generatedAt : generatedAt)}</strong>
           </div>
         </header>
 
@@ -179,11 +238,17 @@ export function ReportScreen() {
 
         <div className="report-actions no-print">
           <button className="report-button report-button--quiet" type="button" onClick={() => router.push(`/?projectId=${project.id}`)}>Back to map</button>
-          <button className="report-button report-button--quiet" type="button" onClick={emailReport}>Email</button>
-          <button className="report-button report-button--quiet" type="button" onClick={printReport}>Download PDF</button>
+          {canShareReport ? <button className="report-button report-button--quiet" type="button" onClick={() => void shareReport()}>Share report</button> : null}
+          <button className="report-button report-button--quiet" type="button" disabled={pdfState.status !== "ready"} onClick={() => pdfState.status === "ready" && downloadFile(pdfState.file)}>{pdfState.status === "preparing" ? "Preparing PDF..." : "Download PDF"}</button>
           <button className="report-button report-button--dark" type="button" onClick={printReport}>Print</button>
         </div>
-        <span className="no-print report-download-note">Choose “Save as PDF” in the browser print dialog to download {downloadName(project)}.</span>
+        <span className="no-print report-download-note">
+          {pdfState.status === "ready" && canShareReport
+            ? "Share opens your device share sheet with the PDF attached."
+            : "Download saves a PDF on this device; Print opens the browser print dialog."}
+        </span>
+        {pdfState.status === "error" ? <p className="no-print report-action-message" role="status">{pdfState.message}</p> : null}
+        {shareMessage ? <p className="no-print report-action-message" role="status">{shareMessage}</p> : null}
       </div>
     </main>
   )
