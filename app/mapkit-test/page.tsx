@@ -32,6 +32,7 @@ import {
   measurementPointKey,
   toProjectMeasurementData,
 } from "@/lib/measurement/project-geometry"
+import { createTieInSegment } from "@/lib/measurement/tie-in"
 import { appendPersistenceDebugNote } from "@/lib/debug/persistence-debug"
 import { db } from "@/lib/persistence/db"
 import { createEmptyProject } from "@/lib/projects/project-factory"
@@ -301,6 +302,7 @@ function MapKitTestPage() {
   >([])
   const [pendingLineStart, setPendingLineStart] =
     useState<MeasurementPoint | null>(null)
+  const [isComeFromArmed, setIsComeFromArmed] = useState(false)
   const [pendingModeDecisionPoint, setPendingModeDecisionPoint] =
     useState<MeasurementPoint | null>(null)
   const [pendingModeDecisionAnchor, setPendingModeDecisionAnchor] =
@@ -382,6 +384,7 @@ function MapKitTestPage() {
         setSelectedPlace(null)
         setHasPersistedMapCamera(false)
         replaceMeasurementGeometry({ segments: [], pendingLineStart: null })
+        setIsComeFromArmed(false)
         setPendingModeDecisionPoint(null)
         setPendingModeDecisionAnchor(null)
         setPointActionMenu(null)
@@ -543,6 +546,7 @@ function MapKitTestPage() {
         segments: measurementState.segments,
         pendingLineStart: measurementState.pendingLineStart,
       })
+      setIsComeFromArmed(false)
       setPendingModeDecisionPoint(null)
       setPendingModeDecisionAnchor(null)
       setPointActionMenu(null)
@@ -618,6 +622,7 @@ function MapKitTestPage() {
 
   function resetMeasurementSession() {
     replaceMeasurementGeometry({ segments: [], pendingLineStart: null })
+    setIsComeFromArmed(false)
     setPendingModeDecisionPoint(null)
     setPendingModeDecisionAnchor(null)
     setPointActionMenu(null)
@@ -1057,6 +1062,26 @@ function MapKitTestPage() {
       const next = { ...current, pendingLineStart: tappedPoint }
       replaceMeasurementGeometry(next)
       persistMeasurementGeometry(next)
+      setIsComeFromArmed(false)
+      setPendingModeDecisionPoint(null)
+      setPendingModeDecisionAnchor(null)
+      return
+    }
+
+    if (isComeFromArmed) {
+      const segment = createTieInSegment(
+        current.pendingLineStart,
+        tappedPoint,
+        `${Date.now()}-${current.segments.length}`,
+      )
+      setIsComeFromArmed(false)
+
+      const next: MeasurementGeometryState = {
+        segments: [...current.segments, segment],
+        pendingLineStart: tappedPoint,
+      }
+      replaceMeasurementGeometry(next)
+      persistMeasurementGeometry(next)
       setPendingModeDecisionPoint(null)
       setPendingModeDecisionAnchor(null)
       return
@@ -1095,6 +1120,7 @@ function MapKitTestPage() {
 
   function applyMeasurementModeChoice(mode: "continue" | "start-new") {
     const decisionPoint = pendingModeDecisionPoint
+    setIsComeFromArmed(false)
     setPendingModeDecisionPoint(null)
     setPendingModeDecisionAnchor(null)
     setPointActionMenu(null)
@@ -1164,6 +1190,7 @@ function MapKitTestPage() {
   }
 
   function openPointActionMenu(point: ProjectedMeasurementPoint) {
+    setIsComeFromArmed(false)
     setPendingModeDecisionPoint(null)
     setPendingModeDecisionAnchor(null)
     const visualPoint = baseViewportPointToVisualViewportPoint(
@@ -1179,12 +1206,40 @@ function MapKitTestPage() {
     })
   }
 
-  function handleTieInPoint(point: MeasurementPoint) {
+  function handleComeToPoint(point: MeasurementPoint) {
+    setPendingModeDecisionPoint(null)
+    setPendingModeDecisionAnchor(null)
+    const current = measurementGeometryRef.current
+    const latestPoint =
+      current.pendingLineStart ??
+      current.segments[current.segments.length - 1]?.end ??
+      null
+    const next: MeasurementGeometryState = latestPoint
+      ? {
+          segments: [
+            ...current.segments,
+            createTieInSegment(
+              latestPoint,
+              point,
+              `${Date.now()}-${current.segments.length}`,
+            ),
+          ],
+          pendingLineStart: point,
+        }
+      : { ...current, pendingLineStart: point }
+    replaceMeasurementGeometry(next)
+    persistMeasurementGeometry(next)
+    setIsComeFromArmed(false)
+    setPointActionMenu(null)
+  }
+
+  function handleComeFromPoint(point: MeasurementPoint) {
     setPendingModeDecisionPoint(null)
     setPendingModeDecisionAnchor(null)
     const next = { ...measurementGeometryRef.current, pendingLineStart: point }
     replaceMeasurementGeometry(next)
     persistMeasurementGeometry(next)
+    setIsComeFromArmed(true)
     setPointActionMenu(null)
   }
 
@@ -1205,6 +1260,12 @@ function MapKitTestPage() {
     }
     replaceMeasurementGeometry(next)
     persistMeasurementGeometry(next)
+    if (
+      current.pendingLineStart &&
+      measurementPointKey(current.pendingLineStart) === targetKey
+    ) {
+      setIsComeFromArmed(false)
+    }
     setPendingModeDecisionPoint((currentPoint) =>
       currentPoint && measurementPointKey(currentPoint) === targetKey
         ? null
@@ -1834,6 +1895,7 @@ function MapKitTestPage() {
     mapReady,
     pendingModeDecisionPoint,
     pendingLineStart,
+    isComeFromArmed,
     measurementSegments,
     superZoomActive,
   ])
@@ -2600,7 +2662,7 @@ function MapKitTestPage() {
                 : pointActionMenu.anchor.x + 20,
             top: Math.min(
               Math.max(pointActionMenu.anchor.y - 44, 12),
-              window.innerHeight - 108,
+              window.innerHeight - 160,
             ),
             zIndex: 3,
             display: "grid",
@@ -2615,7 +2677,7 @@ function MapKitTestPage() {
         >
           <button
             type="button"
-            onClick={() => handleTieInPoint(pointActionMenu.point)}
+            onClick={() => handleComeToPoint(pointActionMenu.point)}
             style={{
               border: 0,
               borderRadius: 12,
@@ -2625,7 +2687,21 @@ function MapKitTestPage() {
               cursor: "pointer",
             }}
           >
-            Tie in
+            Come To
+          </button>
+          <button
+            type="button"
+            onClick={() => handleComeFromPoint(pointActionMenu.point)}
+            style={{
+              border: 0,
+              borderRadius: 12,
+              padding: "10px 12px",
+              background: "rgba(31, 37, 34, 0.08)",
+              color: "#1f2522",
+              cursor: "pointer",
+            }}
+          >
+            Come From
           </button>
           <button
             type="button"
@@ -2634,8 +2710,8 @@ function MapKitTestPage() {
               border: 0,
               borderRadius: 12,
               padding: "10px 12px",
-              background: "rgba(31, 37, 34, 0.08)",
-              color: "#1f2522",
+              background: "rgba(184, 53, 47, 0.1)",
+              color: "#a62d27",
               cursor: "pointer",
             }}
           >

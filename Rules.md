@@ -78,5 +78,5 @@ Prevent errors
 * Do not switch measurement rendering between DOM overlay and native MapKit overlays based on zoom level; keep one consistent render path.
 * When serializing project geometry, populate all segment endpoints before building the saved `points` array.
 * When saving a project after address search, clear measurement geometry first so old points do not carry into the new project.
-
+* When reopening a project, do not persist MapKit's initial/default region while the saved camera or saved property coordinates are still being applied; ignore a default camera that is clearly far from the property and use the property-coordinate fallback.
 
