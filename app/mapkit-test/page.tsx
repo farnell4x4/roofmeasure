@@ -4,6 +4,8 @@ import { MapPin, Search } from "lucide-react"
 import {
   FormEvent,
   PointerEvent as ReactPointerEvent,
+  Suspense,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -30,6 +32,7 @@ import {
   measurementPointKey,
   toProjectMeasurementData,
 } from "@/lib/measurement/project-geometry"
+import { appendPersistenceDebugNote } from "@/lib/debug/persistence-debug"
 import { db } from "@/lib/persistence/db"
 import { createEmptyProject } from "@/lib/projects/project-factory"
 import { haversineDistanceFeet } from "@/lib/measurement/geometry"
@@ -45,8 +48,12 @@ import {
 type LocationPermission = PermissionState | "unsupported"
 const LOCATION_ALERT_DISMISSED_KEY =
   "roofmeasure.mapkit-test.location-alert-dismissed"
+const LAST_ACTIVE_PROJECT_ID_KEY = "roofmeasure.last-active-project-id"
 const SEARCH_MAX_ZOOM_SPAN = 0.00005
 const MAP_CAMERA_SAVE_DELAY_MS = 350
+const INITIAL_MAP_CENTER = { lat: 39.5501, lng: -105.7821 }
+const INITIAL_MAP_CENTER_TOLERANCE = 0.000001
+const INITIAL_CAMERA_MISMATCH_FEET = 2_640
 type DecisionAnchor = { x: number; y: number }
 type PointActionMenuState = {
   point: MeasurementPoint
@@ -75,6 +82,15 @@ type MeasurementGeometryState = {
   pendingLineStart: MeasurementPoint | null
 }
 
+type SavedProjectMapRouteDebug = {
+  projectId: string
+  projectName: string
+  propertyLocation: PropertyLocation | null
+  savedCamera: MapCameraState | null
+  expectedCamera: MapCameraState | null
+  expectedRoute: "saved camera" | "property location fallback" | "unavailable"
+}
+
 const EMPTY_PROJECTED_MEASUREMENT_OVERLAY: ProjectedMeasurementOverlay = {
   segments: [],
   points: [],
@@ -99,6 +115,38 @@ function mapCameraSignature(camera: MapCameraState | null) {
   return [camera.centerLat, camera.centerLng, camera.latSpan, camera.lngSpan]
     .map((value) => value.toPrecision(14))
     .join(":")
+}
+
+function isUsablePropertyLocation(
+  location: PropertyLocation | undefined,
+): location is PropertyLocation {
+  return Boolean(
+    location &&
+      Number.isFinite(location.latitude) &&
+      Number.isFinite(location.longitude) &&
+      location.latitude >= -90 &&
+      location.latitude <= 90 &&
+      location.longitude >= -180 &&
+      location.longitude <= 180,
+  )
+}
+
+function isInitialMapCamera(camera: MapCameraState) {
+  return (
+    Math.abs(camera.centerLat - INITIAL_MAP_CENTER.lat) <=
+      INITIAL_MAP_CENTER_TOLERANCE &&
+    Math.abs(camera.centerLng - INITIAL_MAP_CENTER.lng) <=
+      INITIAL_MAP_CENTER_TOLERANCE
+  )
+}
+
+function formatCoordinate(latitude: number, longitude: number) {
+  return `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+}
+
+function formatMapCamera(camera: MapCameraState | null) {
+  if (!camera || !isUsableMapCamera(camera)) return "none"
+  return `center ${formatCoordinate(camera.centerLat, camera.centerLng)} • span ${camera.latSpan.toPrecision(6)} × ${camera.lngSpan.toPrecision(6)}`
 }
 
 function toProjectLocation(
@@ -145,11 +193,20 @@ async function requestCurrentLocation() {
   })
 }
 
-export default function MapKitTestPage() {
+export default function Page() {
+  return (
+    <Suspense fallback={null}>
+      <MapKitTestPage />
+    </Suspense>
+  )
+}
+
+function MapKitTestPage() {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
   const projectId = searchParams.get("projectId")
+  const newProjectRequested = searchParams.get("new") === "1"
   const mapViewportRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<HTMLDivElement | null>(null)
   const mapInstanceRef = useRef<InstanceType<
@@ -158,6 +215,7 @@ export default function MapKitTestPage() {
   const currentProjectIdRef = useRef<string | null>(null)
   const projectEpochRef = useRef(0)
   const isProjectHydratingRef = useRef(false)
+  const isProjectMapRouteSettlingRef = useRef(false)
   const saveQueueRef = useRef(Promise.resolve<void>(undefined))
   const pendingProjectRef = useRef<Project | null>(null)
   const measurementGeometryRef = useRef<MeasurementGeometryState>({
@@ -167,11 +225,17 @@ export default function MapKitTestPage() {
   const cameraSaveTimerRef = useRef<number | null>(null)
   const mapCameraRef = useRef<MapCameraState | null>(null)
   const pendingMapCameraRestoreRef = useRef<MapCameraState | null>(null)
+  const pendingSavedProjectMapRouteDebugRef =
+    useRef<SavedProjectMapRouteDebug | null>(null)
   const lastPersistedGeometryRef = useRef<{
     projectId: string
     signature: string
   } | null>(null)
   const lastPersistedMapCameraRef = useRef<{
+    projectId: string
+    signature: string
+  } | null>(null)
+  const lastGeometryPreservationNoticeRef = useRef<{
     projectId: string
     signature: string
   } | null>(null)
@@ -295,11 +359,22 @@ export default function MapKitTestPage() {
     }
 
     async function hydrateProject() {
-      if (!projectId) {
+      const fallbackProjectId =
+        !projectId && !newProjectRequested
+          ? window.localStorage.getItem(LAST_ACTIVE_PROJECT_ID_KEY)
+          : null
+      const requestedProjectId = projectId ?? fallbackProjectId
+
+      if (newProjectRequested) {
+        appendPersistenceDebugNote(
+          "IndexedDB HYDRATION SKIPPED • New-project session requested",
+        )
         currentProjectIdRef.current = null
         pendingProjectRef.current = null
         mapCameraRef.current = null
         pendingMapCameraRestoreRef.current = null
+        pendingSavedProjectMapRouteDebugRef.current = null
+        isProjectMapRouteSettlingRef.current = false
         lastPersistedGeometryRef.current = null
         lastPersistedMapCameraRef.current = null
         setCurrentProjectId(null)
@@ -318,17 +393,132 @@ export default function MapKitTestPage() {
       }
 
       setProjectHydrated(false)
-      const project = await db.getProject(projectId)
+      let project: Project | undefined
+      let hydrationSource: "URL" | "last active" | "most recent" | "recovery" =
+        projectId ? "URL" : fallbackProjectId ? "last active" : "most recent"
+
+      try {
+        if (requestedProjectId) {
+          const loaded = await db.getProjectForHydration(requestedProjectId)
+          project = loaded?.project
+          if (loaded?.source === "recovery") hydrationSource = "recovery"
+        } else {
+          project = await db.getMostRecentProject()
+        }
+      } catch (error) {
+        if (!cancelled && hydrationEpoch === projectEpochRef.current) {
+          appendPersistenceDebugNote(
+            `IndexedDB HYDRATION FAILED • ${error instanceof Error ? error.message : "Could not open the local project database"}`,
+          )
+          isProjectHydratingRef.current = false
+          isProjectMapRouteSettlingRef.current = false
+        }
+        return
+      }
+
       if (!project || cancelled || hydrationEpoch !== projectEpochRef.current) {
+        if (
+          !project &&
+          !cancelled &&
+          hydrationEpoch === projectEpochRef.current
+        ) {
+          appendPersistenceDebugNote(
+            requestedProjectId
+              ? `IndexedDB HYDRATION FAILED • Project ${requestedProjectId.slice(-8)} was not found`
+              : "IndexedDB HYDRATION FAILED • No saved project was found",
+          )
+          if (!projectId) {
+            window.localStorage.removeItem(LAST_ACTIVE_PROJECT_ID_KEY)
+          }
+        }
         if (!cancelled && hydrationEpoch === projectEpochRef.current) {
           isProjectHydratingRef.current = false
+          isProjectMapRouteSettlingRef.current = false
         }
         return
       }
       const measurementState = fromProjectMeasurementData(project)
-      const savedMapCamera = isUsableMapCamera(project.mapCamera)
+      window.localStorage.setItem(LAST_ACTIVE_PROJECT_ID_KEY, project.id)
+      if (
+        measurementState.segments.length > 0 ||
+        measurementState.pendingLineStart
+      ) {
+        appendPersistenceDebugNote(
+          `IndexedDB HYDRATED • ${project.name} (${project.id.slice(-8)}) • ${measurementState.segments.length} segment(s), open endpoint ${measurementState.pendingLineStart ? "yes" : "no"}`,
+        )
+      }
+      if (!projectId) {
+        appendPersistenceDebugNote(
+          `IndexedDB ACTIVE PROJECT RESTORED • ${project.name} (${project.id.slice(-8)}) • ${hydrationSource}`,
+        )
+        router.replace(`/?projectId=${project.id}`)
+      }
+      const persistedMapCamera = isUsableMapCamera(project.mapCamera)
         ? project.mapCamera
         : null
+      const savedPropertyLocation = isUsablePropertyLocation(project.location)
+        ? project.location
+        : null
+      const initialCameraDistanceFeet =
+        persistedMapCamera && savedPropertyLocation
+          ? haversineDistanceFeet(
+              {
+                lat: persistedMapCamera.centerLat,
+                lng: persistedMapCamera.centerLng,
+              },
+              {
+                lat: savedPropertyLocation.latitude,
+                lng: savedPropertyLocation.longitude,
+              },
+            )
+          : null
+      const ignoredInitialMapCamera = Boolean(
+        persistedMapCamera &&
+          savedPropertyLocation &&
+          isInitialMapCamera(persistedMapCamera) &&
+          initialCameraDistanceFeet !== null &&
+          initialCameraDistanceFeet > INITIAL_CAMERA_MISMATCH_FEET,
+      )
+      const savedMapCamera = ignoredInitialMapCamera
+        ? null
+        : persistedMapCamera
+      if (ignoredInitialMapCamera) {
+        appendPersistenceDebugNote(
+          `SAVED PROJECT MAP CAMERA IGNORED • ${project.name} (${project.id.slice(-8)}) • persisted camera matches the initial Colorado map center but is ${(initialCameraDistanceFeet! / 5280).toFixed(1)} mi from the saved property; routing to property coordinates instead`,
+        )
+      }
+      const expectedMapRoute: SavedProjectMapRouteDebug = {
+        projectId: project.id,
+        projectName: project.name,
+        propertyLocation: savedPropertyLocation,
+        savedCamera: savedMapCamera,
+        expectedCamera: savedMapCamera ??
+          (savedPropertyLocation
+            ? {
+                centerLat: savedPropertyLocation.latitude,
+                centerLng: savedPropertyLocation.longitude,
+                latSpan: SEARCH_MAX_ZOOM_SPAN,
+                lngSpan: SEARCH_MAX_ZOOM_SPAN,
+              }
+            : null),
+        expectedRoute: savedMapCamera
+          ? "saved camera"
+          : savedPropertyLocation
+            ? "property location fallback"
+            : "unavailable",
+      }
+      pendingSavedProjectMapRouteDebugRef.current = expectedMapRoute
+      isProjectMapRouteSettlingRef.current =
+        expectedMapRoute.expectedRoute !== "unavailable"
+      appendPersistenceDebugNote(
+        `SAVED PROJECT MAP EXPECTED • ${project.name} (${project.id.slice(-8)}) • property ${savedPropertyLocation ? `${savedPropertyLocation.formattedAddress || "unnamed"} @ ${formatCoordinate(savedPropertyLocation.latitude, savedPropertyLocation.longitude)}` : "missing"} • persisted camera ${formatMapCamera(persistedMapCamera)} • opening route ${expectedMapRoute.expectedRoute}`,
+      )
+      if (expectedMapRoute.expectedRoute === "unavailable") {
+        appendPersistenceDebugNote(
+          `SAVED PROJECT MAP ACTUAL • ${project.name} (${project.id.slice(-8)}) • no saved camera or valid property coordinates, so no saved-project map route was applied`,
+        )
+        pendingSavedProjectMapRouteDebugRef.current = null
+      }
 
       currentProjectIdRef.current = project.id
       pendingProjectRef.current = null
@@ -374,7 +564,7 @@ export default function MapKitTestPage() {
     return () => {
       cancelled = true
     }
-  }, [pathname, projectId])
+  }, [newProjectRequested, pathname, projectId, router])
 
   function dismissLocationAlert() {
     setIsLocationAlertDismissed(true)
@@ -420,6 +610,7 @@ export default function MapKitTestPage() {
       pendingLineStart: next.pendingLineStart,
       targetProjectId,
       projectEpoch,
+      debugReason: "measurement",
     }).catch((error) => {
       console.error("Measurement project save failed.", error)
     })
@@ -506,7 +697,7 @@ export default function MapKitTestPage() {
     )
   }
 
-  function readMapCamera(): MapCameraState | null {
+  const readMapCamera = useCallback((): MapCameraState | null => {
     const region = mapInstanceRef.current?.region
     const centerLat = region?.center.latitude
     const centerLng = region?.center.longitude
@@ -523,7 +714,39 @@ export default function MapKitTestPage() {
 
     const camera = { centerLat, centerLng, latSpan, lngSpan }
     return isUsableMapCamera(camera) ? camera : null
-  }
+  }, [])
+
+  const recordSavedProjectMapRoute = useCallback((
+    route: SavedProjectMapRouteDebug["expectedRoute"],
+  ) => {
+    const expected = pendingSavedProjectMapRouteDebugRef.current
+    if (!expected || expected.expectedRoute !== route) return
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (pendingSavedProjectMapRouteDebugRef.current !== expected) return
+
+        const actualCamera = readMapCamera()
+        const centerDeltaFeet =
+          expected.expectedCamera && actualCamera
+            ? haversineDistanceFeet(
+                {
+                  lat: expected.expectedCamera.centerLat,
+                  lng: expected.expectedCamera.centerLng,
+                },
+                {
+                  lat: actualCamera.centerLat,
+                  lng: actualCamera.centerLng,
+                },
+              )
+            : null
+        appendPersistenceDebugNote(
+          `SAVED PROJECT MAP ACTUAL • ${expected.projectName} (${expected.projectId.slice(-8)}) • routed via ${route} • expected ${formatMapCamera(expected.expectedCamera)} • actual ${formatMapCamera(actualCamera)}${centerDeltaFeet === null ? "" : ` • center delta ${centerDeltaFeet.toFixed(1)} ft`}`,
+        )
+        pendingSavedProjectMapRouteDebugRef.current = null
+      })
+    })
+  }, [readMapCamera])
 
   function restoreMapCamera(camera: MapCameraState) {
     const mapkit = window.mapkit
@@ -534,12 +757,22 @@ export default function MapKitTestPage() {
       new mapkit.Coordinate(camera.centerLat, camera.centerLng),
       new mapkit.CoordinateSpan(camera.latSpan, camera.lngSpan),
     )
+    recordSavedProjectMapRoute("saved camera")
   }
 
   function scheduleMapCameraSave() {
     const camera = readMapCamera()
     const targetProjectId = currentProjectIdRef.current
-    if (!camera || !targetProjectId || isProjectHydratingRef.current) return
+    // MapKit emits region events for its initial Colorado viewport. Do not let
+    // that transient region become this project's saved camera before the
+    // persisted camera or property-coordinate fallback has been applied.
+    if (
+      !camera ||
+      !targetProjectId ||
+      isProjectHydratingRef.current ||
+      isProjectMapRouteSettlingRef.current
+    )
+      return
 
     mapCameraRef.current = camera
     setHasPersistedMapCamera(true)
@@ -567,6 +800,7 @@ export default function MapKitTestPage() {
         mapCamera: camera,
         targetProjectId,
         projectEpoch,
+        debugReason: "camera",
       }).catch(() => undefined)
     }, MAP_CAMERA_SAVE_DELAY_MS)
   }
@@ -585,47 +819,51 @@ export default function MapKitTestPage() {
     pendingLineStart?: MeasurementPoint | null
     mapCamera?: MapCameraState | null
     targetProjectId?: string | null
+    startNewProject?: boolean
     projectEpoch?: number
+    debugReason?: "measurement" | "camera" | "address"
   }) {
-    const snapshotSegments = options?.measurementSegments ?? measurementSegments
+    // Only a measurement action is allowed to replace project geometry. Map
+    // callbacks and other metadata writes can run with old React closures.
+    const hasExplicitMeasurementGeometry = Boolean(
+      options &&
+      ("measurementSegments" in options || "pendingLineStart" in options),
+    )
+    const snapshotSegments = hasExplicitMeasurementGeometry
+      ? (options?.measurementSegments ?? [])
+      : null
     const snapshotPendingLineStart =
-      options && "pendingLineStart" in options
+      hasExplicitMeasurementGeometry && options && "pendingLineStart" in options
         ? (options.pendingLineStart ?? null)
-        : pendingLineStart
+        : null
     const snapshotQuery = query.trim()
     const snapshotLocation = options?.location
     const snapshotProjectName = options?.projectName
-    const requestedProjectId =
-      options && "targetProjectId" in options
+    const requestedProjectId = options?.startNewProject
+      ? null
+      : options && "targetProjectId" in options
         ? (options.targetProjectId ?? null)
         : currentProjectIdRef.current
     const fallbackProjectName =
       (snapshotProjectName ?? snapshotQuery) ||
       snapshotLocation?.formattedAddress ||
       "Untitled Project"
-    const pendingProject = requestedProjectId
-      ? pendingProjectRef.current?.id === requestedProjectId
-        ? pendingProjectRef.current
-        : null
-      : (pendingProjectRef.current ??
-        (pendingProjectRef.current = createEmptyProject(fallbackProjectName)))
+    const pendingProject = options?.startNewProject
+      ? (pendingProjectRef.current = createEmptyProject(fallbackProjectName))
+      : requestedProjectId
+        ? pendingProjectRef.current?.id === requestedProjectId
+          ? pendingProjectRef.current
+          : null
+        : (pendingProjectRef.current ??
+          (pendingProjectRef.current = createEmptyProject(fallbackProjectName)))
     const targetProjectId = requestedProjectId ?? pendingProject?.id ?? null
     const projectEpoch = options?.projectEpoch ?? projectEpochRef.current
     const hasExplicitMapCamera = Boolean(options && "mapCamera" in options)
     const snapshotMapCamera = hasExplicitMapCamera
       ? (options?.mapCamera ?? null)
       : mapCameraRef.current
-    const geometrySignature = measurementGeometrySignature(
-      snapshotSegments,
-      snapshotPendingLineStart,
-    )
-
     const persistSnapshot = async () => {
       if (projectEpoch !== projectEpochRef.current) return null
-      const geometry = toProjectMeasurementData(
-        snapshotSegments,
-        snapshotPendingLineStart,
-      )
       const existingProject = targetProjectId
         ? await db.getProject(targetProjectId)
         : undefined
@@ -639,24 +877,95 @@ export default function MapKitTestPage() {
         existingProject?.name ??
         pendingProject?.name ??
         fallbackProjectName
-      const baseProject = existingProject ?? pendingProject ?? createEmptyProject(projectName)
-      const savedProject = await db.saveProject({
-        ...baseProject,
-        name: projectName,
-        location:
-          snapshotLocation === undefined
-            ? baseProject.location
-            : (snapshotLocation ?? undefined),
-        measurementGeometry: geometry.measurementGeometry,
-        points: geometry.points,
-        segments: geometry.segments,
-        groups: [],
-        planes: [],
-        mapCamera: hasExplicitMapCamera
-          ? (snapshotMapCamera ?? undefined)
-          : (snapshotMapCamera ?? baseProject.mapCamera),
-        lastOpenedAt: new Date().toISOString(),
-      })
+      const baseProject =
+        existingProject ?? pendingProject ?? createEmptyProject(projectName)
+      const existingMeasurement = fromProjectMeasurementData(baseProject)
+      const geometry = hasExplicitMeasurementGeometry
+        ? toProjectMeasurementData(
+            snapshotSegments ?? [],
+            snapshotPendingLineStart,
+          )
+        : toProjectMeasurementData(
+            existingMeasurement.segments,
+            existingMeasurement.pendingLineStart,
+          )
+      const geometrySignature = measurementGeometrySignature(
+        hasExplicitMeasurementGeometry
+          ? (snapshotSegments ?? [])
+          : existingMeasurement.segments,
+        hasExplicitMeasurementGeometry
+          ? snapshotPendingLineStart
+          : existingMeasurement.pendingLineStart,
+      )
+      if (
+        options?.debugReason === "camera" &&
+        (existingMeasurement.segments.length > 0 ||
+          existingMeasurement.pendingLineStart) &&
+        (lastGeometryPreservationNoticeRef.current?.projectId !==
+          baseProject.id ||
+          lastGeometryPreservationNoticeRef.current.signature !==
+            geometrySignature)
+      ) {
+        lastGeometryPreservationNoticeRef.current = {
+          projectId: baseProject.id,
+          signature: geometrySignature,
+        }
+        appendPersistenceDebugNote(
+          `IndexedDB CAMERA SAVE PRESERVED • ${baseProject.name} (${baseProject.id.slice(-8)}) • ${existingMeasurement.segments.length} segment(s) left unchanged`,
+        )
+      }
+      let savedProject: Project
+      try {
+        savedProject = await db.saveProject({
+          ...baseProject,
+          name: projectName,
+          location:
+            snapshotLocation === undefined
+              ? baseProject.location
+              : (snapshotLocation ?? undefined),
+          measurementGeometry: geometry.measurementGeometry,
+          points: geometry.points,
+          segments: geometry.segments,
+          mapCamera: hasExplicitMapCamera
+            ? (snapshotMapCamera ?? undefined)
+            : (snapshotMapCamera ?? baseProject.mapCamera),
+          lastOpenedAt: new Date().toISOString(),
+        })
+      } catch (error) {
+        if (options?.debugReason === "measurement") {
+          appendPersistenceDebugNote(
+            `IndexedDB SAVE FAILED • ${geometry.points.length} point(s), ${geometry.segments.length} segment(s) • ${error instanceof Error ? error.message : "unknown error"}`,
+          )
+        }
+        throw error
+      }
+
+      const verifiedProject = await db.getProject(savedProject.id)
+      const verifiedMeasurement = verifiedProject
+        ? fromProjectMeasurementData(verifiedProject)
+        : null
+      const isVerified = Boolean(
+        verifiedProject &&
+        verifiedMeasurement &&
+        measurementGeometrySignature(
+          verifiedMeasurement.segments,
+          verifiedMeasurement.pendingLineStart,
+        ) === geometrySignature,
+      )
+
+      if (options?.debugReason === "measurement") {
+        appendPersistenceDebugNote(
+          isVerified
+            ? `IndexedDB VERIFIED • ${savedProject.name} (${savedProject.id.slice(-8)}) • ${geometry.points.length} point(s), ${geometry.segments.length} segment(s), open endpoint ${snapshotPendingLineStart ? "yes" : "no"}`
+            : `IndexedDB VERIFY FAILED • ${savedProject.name} (${savedProject.id.slice(-8)}) • wrote ${geometry.points.length} point(s), reread did not match`,
+        )
+      }
+
+      if (!isVerified) {
+        throw new Error(
+          "IndexedDB reread did not match the measurement geometry that was saved.",
+        )
+      }
 
       if (projectEpoch !== projectEpochRef.current) return savedProject
 
@@ -674,6 +983,7 @@ export default function MapKitTestPage() {
 
       if (currentProjectIdRef.current !== savedProject.id) {
         currentProjectIdRef.current = savedProject.id
+        window.localStorage.setItem(LAST_ACTIVE_PROJECT_ID_KEY, savedProject.id)
         setCurrentProjectId(savedProject.id)
         router.replace(`/?projectId=${savedProject.id}`)
       }
@@ -1161,7 +1471,10 @@ export default function MapKitTestPage() {
           return
         }
 
-        const center = new mapkit.Coordinate(39.5501, -105.7821)
+        const center = new mapkit.Coordinate(
+          INITIAL_MAP_CENTER.lat,
+          INITIAL_MAP_CENTER.lng,
+        )
         const span = new mapkit.CoordinateSpan(0.04, 0.04)
         const region = new mapkit.CoordinateRegion(center, span)
 
@@ -1215,6 +1528,7 @@ export default function MapKitTestPage() {
 
     restoreMapCamera(camera)
     pendingMapCameraRestoreRef.current = null
+    isProjectMapRouteSettlingRef.current = false
     scheduleProjectionRefresh()
   }, [currentProjectId, mapReady, projectHydrated])
 
@@ -1489,7 +1803,14 @@ export default function MapKitTestPage() {
       SEARCH_MAX_ZOOM_SPAN,
       SEARCH_MAX_ZOOM_SPAN,
     )
-  }, [hasPersistedMapCamera, mapReady, selectedPlace])
+    isProjectMapRouteSettlingRef.current = false
+    recordSavedProjectMapRoute("property location fallback")
+  }, [
+    hasPersistedMapCamera,
+    mapReady,
+    recordSavedProjectMapRoute,
+    selectedPlace,
+  ])
 
   useEffect(() => {
     if (!mapReady || !mapRef.current || !mapInstanceRef.current) return
@@ -1585,6 +1906,7 @@ export default function MapKitTestPage() {
         measurementSegments: [],
         pendingLineStart: null,
         mapCamera: null,
+        startNewProject: true,
       })
       setSuppressSuggestionsUntilTyping(true)
       resetMeasurementSession()
@@ -1630,6 +1952,7 @@ export default function MapKitTestPage() {
           measurementSegments: [],
           pendingLineStart: null,
           mapCamera: null,
+          startNewProject: true,
         })
         setSuppressSuggestionsUntilTyping(true)
         resetMeasurementSession()
@@ -1681,6 +2004,7 @@ export default function MapKitTestPage() {
         measurementSegments: [],
         pendingLineStart: null,
         mapCamera: null,
+        startNewProject: true,
       })
       setSuppressSuggestionsUntilTyping(true)
       resetMeasurementSession()
