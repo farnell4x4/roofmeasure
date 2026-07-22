@@ -7,6 +7,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react"
@@ -37,6 +38,7 @@ import { appendPersistenceDebugNote } from "@/lib/debug/persistence-debug"
 import { db } from "@/lib/persistence/db"
 import { createEmptyProject } from "@/lib/projects/project-factory"
 import { haversineDistanceFeet } from "@/lib/measurement/geometry"
+import { detectRoofPlanes } from "@/lib/measurement/plane-detection"
 import { AddressSuggestion } from "@/types/mapkit"
 import {
   EditableMeasurementPoint as MeasurementPoint,
@@ -44,6 +46,7 @@ import {
   MapCameraState,
   PropertyLocation,
   Project,
+  RoofPlane,
 } from "@/types/models"
 
 type LocationPermission = PermissionState | "unsupported"
@@ -59,6 +62,11 @@ type DecisionAnchor = { x: number; y: number }
 type PointActionMenuState = {
   point: MeasurementPoint
   anchor: DecisionAnchor
+}
+type PlanePitchMenuState = {
+  planeId: string
+  anchor: DecisionAnchor
+  draft: string
 }
 type ProjectedMeasurementPoint = MeasurementPoint & {
   key: string
@@ -223,6 +231,7 @@ function MapKitTestPage() {
     segments: [],
     pendingLineStart: null,
   })
+  const roofPlanesRef = useRef<RoofPlane[]>([])
   const cameraSaveTimerRef = useRef<number | null>(null)
   const mapCameraRef = useRef<MapCameraState | null>(null)
   const pendingMapCameraRestoreRef = useRef<MapCameraState | null>(null)
@@ -309,6 +318,9 @@ function MapKitTestPage() {
     useState<DecisionAnchor | null>(null)
   const [pointActionMenu, setPointActionMenu] =
     useState<PointActionMenuState | null>(null)
+  const [planePitchMenu, setPlanePitchMenu] =
+    useState<PlanePitchMenuState | null>(null)
+  const [roofPlanes, setRoofPlanes] = useState<RoofPlane[]>([])
   const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] =
     useState(false)
   const [precisionZoom, setPrecisionZoom] = useState(DEFAULT_PRECISION_ZOOM)
@@ -331,6 +343,20 @@ function MapKitTestPage() {
   const superZoomOffsetX = precisionZoom.offsetX
   const superZoomOffsetY = precisionZoom.offsetY
   const superZoomActive = precisionZoom.scale > 1
+  const projectedRoofPlanes = useMemo(() => {
+    const pointsByKey = new Map(
+      projectedMeasurementOverlay.points.map((point) => [point.key, point]),
+    )
+
+    return roofPlanes
+      .map((plane) => ({
+        ...plane,
+        points: plane.pointIds
+          .map((pointId) => pointsByKey.get(pointId))
+          .filter((point): point is ProjectedMeasurementPoint => Boolean(point)),
+      }))
+      .filter((plane) => plane.points.length >= 3)
+  }, [projectedMeasurementOverlay.points, roofPlanes])
 
   const safariLocationHelp =
     'In Safari, open Website Settings for this page and change Location to "Allow", then reload this page.'
@@ -388,6 +414,7 @@ function MapKitTestPage() {
         setPendingModeDecisionPoint(null)
         setPendingModeDecisionAnchor(null)
         setPointActionMenu(null)
+        setPlanePitchMenu(null)
         setSuppressSuggestionsUntilTyping(false)
         resetSuperZoom()
         setProjectHydrated(true)
@@ -542,6 +569,8 @@ function MapKitTestPage() {
       setQuery(project.location?.formattedAddress ?? project.name)
       setSuppressSuggestionsUntilTyping(Boolean(project.location))
       setHasPersistedMapCamera(Boolean(savedMapCamera))
+      roofPlanesRef.current = project.planes
+      setRoofPlanes(project.planes)
       replaceMeasurementGeometry({
         segments: measurementState.segments,
         pendingLineStart: measurementState.pendingLineStart,
@@ -550,6 +579,7 @@ function MapKitTestPage() {
       setPendingModeDecisionPoint(null)
       setPendingModeDecisionAnchor(null)
       setPointActionMenu(null)
+      setPlanePitchMenu(null)
       resetSuperZoom()
       setSelectedPlace(
         project.location
@@ -588,6 +618,18 @@ function MapKitTestPage() {
     measurementGeometryRef.current = next
     setMeasurementSegments(next.segments)
     setPendingLineStart(next.pendingLineStart)
+
+    const geometry = toProjectMeasurementData(
+      next.segments,
+      next.pendingLineStart,
+    )
+    const nextPlanes = detectRoofPlanes(
+      geometry.points,
+      geometry.segments,
+      roofPlanesRef.current,
+    )
+    roofPlanesRef.current = nextPlanes
+    setRoofPlanes(nextPlanes)
   }
 
   function persistMeasurementGeometry(next: MeasurementGeometryState) {
@@ -626,6 +668,7 @@ function MapKitTestPage() {
     setPendingModeDecisionPoint(null)
     setPendingModeDecisionAnchor(null)
     setPointActionMenu(null)
+    setPlanePitchMenu(null)
     setIsMeasurementSettingsOpen(false)
   }
 
@@ -822,11 +865,12 @@ function MapKitTestPage() {
     location?: PropertyLocation | null
     measurementSegments?: MeasurementSegment[]
     pendingLineStart?: MeasurementPoint | null
+    roofPlanes?: RoofPlane[]
     mapCamera?: MapCameraState | null
     targetProjectId?: string | null
     startNewProject?: boolean
     projectEpoch?: number
-    debugReason?: "measurement" | "camera" | "address"
+    debugReason?: "measurement" | "camera" | "address" | "plane"
   }) {
     // Only a measurement action is allowed to replace project geometry. Map
     // callbacks and other metadata writes can run with old React closures.
@@ -867,6 +911,8 @@ function MapKitTestPage() {
     const snapshotMapCamera = hasExplicitMapCamera
       ? (options?.mapCamera ?? null)
       : mapCameraRef.current
+    const hasExplicitRoofPlanes = Boolean(options && "roofPlanes" in options)
+    const snapshotRoofPlanes = options?.roofPlanes
     const persistSnapshot = async () => {
       if (projectEpoch !== projectEpochRef.current) return null
       const existingProject = targetProjectId
@@ -902,6 +948,9 @@ function MapKitTestPage() {
           ? snapshotPendingLineStart
           : existingMeasurement.pendingLineStart,
       )
+      const planes = hasExplicitRoofPlanes
+        ? (snapshotRoofPlanes ?? [])
+        : detectRoofPlanes(geometry.points, geometry.segments, baseProject.planes)
       if (
         options?.debugReason === "camera" &&
         (existingMeasurement.segments.length > 0 ||
@@ -931,6 +980,7 @@ function MapKitTestPage() {
           measurementGeometry: geometry.measurementGeometry,
           points: geometry.points,
           segments: geometry.segments,
+          planes,
           mapCamera: hasExplicitMapCamera
             ? (snapshotMapCamera ?? undefined)
             : (snapshotMapCamera ?? baseProject.mapCamera),
@@ -1056,6 +1106,7 @@ function MapKitTestPage() {
     anchor: DecisionAnchor | null,
   ) {
     setPointActionMenu(null)
+    setPlanePitchMenu(null)
     const current = measurementGeometryRef.current
 
     if (!current.pendingLineStart) {
@@ -1124,6 +1175,7 @@ function MapKitTestPage() {
     setPendingModeDecisionPoint(null)
     setPendingModeDecisionAnchor(null)
     setPointActionMenu(null)
+    setPlanePitchMenu(null)
     setIsMeasurementSettingsOpen(false)
 
     if (!decisionPoint) return
@@ -1193,6 +1245,7 @@ function MapKitTestPage() {
     setIsComeFromArmed(false)
     setPendingModeDecisionPoint(null)
     setPendingModeDecisionAnchor(null)
+    setPlanePitchMenu(null)
     const visualPoint = baseViewportPointToVisualViewportPoint(
       { x: point.x, y: point.y },
       precisionZoom,
@@ -1204,6 +1257,62 @@ function MapKitTestPage() {
       },
       anchor: visualPoint,
     })
+  }
+
+  function openPlanePitchMenu(
+    event: React.MouseEvent<SVGPolygonElement>,
+    plane: RoofPlane,
+  ) {
+    event.preventDefault()
+    event.stopPropagation()
+    setPointActionMenu(null)
+    setPendingModeDecisionPoint(null)
+    setPendingModeDecisionAnchor(null)
+    setPlanePitchMenu({
+      planeId: plane.id,
+      anchor: { x: event.clientX, y: event.clientY },
+      draft: plane.pitch?.replace(/\/12$/, "") ?? "",
+    })
+  }
+
+  function persistRoofPlanes(nextPlanes: RoofPlane[]) {
+    roofPlanesRef.current = nextPlanes
+    setRoofPlanes(nextPlanes)
+    void saveProjectSnapshot({
+      roofPlanes: nextPlanes,
+      targetProjectId: currentProjectIdRef.current,
+      debugReason: "plane",
+    }).catch((error) => {
+      console.error("Roof plane save failed.", error)
+    })
+  }
+
+  function savePlanePitch() {
+    const menu = planePitchMenu
+    if (!menu) return
+    const rise = Number(menu.draft)
+    if (!Number.isFinite(rise) || rise < 0) return
+
+    persistRoofPlanes(
+      roofPlanesRef.current.map((plane) =>
+        plane.id === menu.planeId
+          ? { ...plane, pitch: `${Number(menu.draft)}/12` }
+          : plane,
+      ),
+    )
+    setPlanePitchMenu(null)
+  }
+
+  function clearPlanePitch() {
+    if (!planePitchMenu) return
+    persistRoofPlanes(
+      roofPlanesRef.current.map((plane) =>
+        plane.id === planePitchMenu.planeId
+          ? { ...plane, pitch: undefined }
+          : plane,
+      ),
+    )
+    setPlanePitchMenu(null)
   }
 
   function handleComeToPoint(point: MeasurementPoint) {
@@ -2719,6 +2828,101 @@ function MapKitTestPage() {
           </button>
         </div>
       ) : null}
+      {planePitchMenu ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            savePlanePitch()
+          }}
+          style={{
+            position: "absolute",
+            left: Math.min(
+              Math.max(planePitchMenu.anchor.x - 82, 12),
+              window.innerWidth - 176,
+            ),
+            top: Math.min(
+              Math.max(planePitchMenu.anchor.y + 16, 12),
+              window.innerHeight - 132,
+            ),
+            zIndex: 4,
+            display: "grid",
+            gap: 10,
+            width: 164,
+            padding: 12,
+            borderRadius: 16,
+            background: "rgba(255, 255, 255, 0.97)",
+            border: "1px solid rgba(31, 37, 34, 0.12)",
+            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
+          }}
+        >
+          <label
+            style={{
+              display: "grid",
+              gap: 6,
+              color: "#1f2522",
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            Pitch
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                aria-label="Roof pitch rise"
+                type="number"
+                min="0"
+                max="36"
+                step="0.25"
+                autoFocus
+                value={planePitchMenu.draft}
+                onChange={(event) =>
+                  setPlanePitchMenu((current) =>
+                    current ? { ...current, draft: event.target.value } : null,
+                  )
+                }
+                style={{
+                  width: 72,
+                  border: "1px solid rgba(31, 37, 34, 0.18)",
+                  borderRadius: 10,
+                  padding: "8px 9px",
+                  color: "#1f2522",
+                  fontSize: 14,
+                }}
+              />
+              <span style={{ color: "#5f685f", fontSize: 14 }}>/12</span>
+            </span>
+          </label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="submit"
+              style={{
+                flex: 1,
+                border: 0,
+                borderRadius: 10,
+                padding: "8px 10px",
+                background: "#1f2522",
+                color: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={clearPlanePitch}
+              style={{
+                border: 0,
+                borderRadius: 10,
+                padding: "8px 10px",
+                background: "rgba(31, 37, 34, 0.08)",
+                color: "#1f2522",
+                cursor: "pointer",
+              }}
+            >
+              Clear
+            </button>
+          </div>
+        </form>
+      ) : null}
       <div
         ref={mapViewportRef}
         style={{
@@ -2761,6 +2965,26 @@ function MapKitTestPage() {
               height="100%"
               style={{ position: "absolute", inset: 0, overflow: "visible" }}
             >
+              {projectedRoofPlanes.map((plane) => (
+                <polygon
+                  key={plane.id}
+                  points={plane.points
+                    .map((point) => {
+                      const visualPoint = baseViewportPointToVisualViewportPoint(
+                        { x: point.x, y: point.y },
+                        precisionZoom,
+                      )
+                      return `${visualPoint.x},${visualPoint.y}`
+                    })
+                    .join(" ")}
+                  fill="rgba(40, 128, 255, 0.5)"
+                  stroke="rgba(22, 91, 196, 0.9)"
+                  strokeWidth={2}
+                  strokeLinejoin="round"
+                  style={{ pointerEvents: "auto", cursor: "pointer" }}
+                  onClick={(event) => openPlanePitchMenu(event, plane)}
+                />
+              ))}
               {projectedMeasurementOverlay.segments.map((segment) => {
                 const start = baseViewportPointToVisualViewportPoint(
                   { x: segment.startX, y: segment.startY },
