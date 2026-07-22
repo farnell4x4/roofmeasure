@@ -11,8 +11,8 @@ describe("precision zoom transform", () => {
   const viewport = { x: 120, y: 80, width: 400, height: 280 }
   const pageOffset = { x: 18, y: 44 }
 
-  it("round-trips base and visual points at five times zoom with a pan offset", () => {
-    const transform = { scale: 5, offsetX: -860, offsetY: -510 }
+  it("round-trips base and visual points at eight times zoom with a pan offset", () => {
+    const transform = { scale: 8, offsetX: -1400, offsetY: -790 }
     const basePoint = { x: 221.25, y: 143.5 }
 
     const visualPoint = baseViewportPointToVisualViewportPoint(

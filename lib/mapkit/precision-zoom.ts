@@ -14,7 +14,7 @@ export type PrecisionZoomTransform = {
   offsetY: number
 }
 
-export const PRECISION_ZOOM_LEVELS = [1, 1.5, 2, 3, 5] as const
+export const PRECISION_ZOOM_LEVELS = [1, 1.5, 2, 3, 5, 8] as const
 
 export const DEFAULT_PRECISION_ZOOM: PrecisionZoomTransform = {
   scale: 1,

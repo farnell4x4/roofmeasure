@@ -3237,16 +3237,8 @@ function MapKitTestPage() {
                       dominantBaseline="central"
                       fontSize={10}
                       fontWeight={800}
-                      style={
-                        plane.pitch
-                          ? { pointerEvents: "none" }
-                          : { pointerEvents: "auto", cursor: "pointer" }
-                      }
-                      onClick={
-                        plane.pitch
-                          ? undefined
-                          : (event) => openPlanePitchMenu(event, plane)
-                      }
+                      style={{ pointerEvents: "auto", cursor: "pointer" }}
+                      onClick={(event) => openPlanePitchMenu(event, plane)}
                     >
                       {plane.pitch?.replace(/12$/, "") ?? "?/12"}
                     </text>
