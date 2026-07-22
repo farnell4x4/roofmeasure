@@ -1,4 +1,5 @@
 import { GeographicPoint, MapCameraState } from "@/types/models";
+import { roundMeasurement } from "@/lib/measurement/rounding";
 
 const EARTH_RADIUS_METERS = 6371008.8;
 
@@ -34,6 +35,52 @@ export function polygonAreaSqFt(points: Array<Pick<GeographicPoint, "lat" | "lng
   }
 
   return Math.abs(area / 2) * 10.7639;
+}
+
+/**
+ * Uses the rounded side labels for rectangular roof planes. Other polygons
+ * retain their coordinate-based area because their side lengths alone do not
+ * uniquely determine an area.
+ */
+export function roundedPolygonAreaSqFt(
+  points: Array<Pick<GeographicPoint, "lat" | "lng">>,
+) {
+  const coordinateAreaSqFt = polygonAreaSqFt(points);
+  if (points.length !== 4) return roundMeasurement(coordinateAreaSqFt);
+
+  const averageLatitude =
+    points.reduce((sum, point) => sum + point.lat, 0) / points.length;
+  const metersPerDegLat = 111132.92;
+  const metersPerDegLng =
+    111412.84 * Math.cos((averageLatitude * Math.PI) / 180);
+  const vertices = points.map((point) => ({
+    x: point.lng * metersPerDegLng,
+    y: point.lat * metersPerDegLat,
+  }));
+  const edges = vertices.map((point, index) => {
+    const next = vertices[(index + 1) % vertices.length];
+    return { x: next.x - point.x, y: next.y - point.y };
+  });
+  const edgeLengths = edges.map((edge) => Math.hypot(edge.x, edge.y));
+  const isRectangle = edges.every((edge, index) => {
+    const next = edges[(index + 1) % edges.length];
+    const denominator = edgeLengths[index] * edgeLengths[(index + 1) % edgeLengths.length];
+    return denominator > 0 && Math.abs(edge.x * next.x + edge.y * next.y) / denominator <= 0.05;
+  });
+  if (!isRectangle) return roundMeasurement(coordinateAreaSqFt);
+
+  const roundedEdges = points.map((point, index) => {
+    const next = points[(index + 1) % points.length];
+    return roundMeasurement(haversineDistanceFeet(point, next));
+  });
+  if (
+    roundedEdges[0] !== roundedEdges[2] ||
+    roundedEdges[1] !== roundedEdges[3]
+  ) {
+    return roundMeasurement(coordinateAreaSqFt);
+  }
+
+  return roundedEdges[0] * roundedEdges[1];
 }
 
 export function pitchFactor(pitch: string) {

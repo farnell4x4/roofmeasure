@@ -42,7 +42,11 @@ import { appendPersistenceDebugNote } from "@/lib/debug/persistence-debug"
 import { db } from "@/lib/persistence/db"
 import { createEmptyProject } from "@/lib/projects/project-factory"
 import { haversineDistanceFeet } from "@/lib/measurement/geometry"
-import { calculateProjectTotals } from "@/lib/measurement/calculations"
+import { roundMeasurement } from "@/lib/measurement/rounding"
+import {
+  calculateProjectTotals,
+  getProjectCalculationBreakdown,
+} from "@/lib/measurement/calculations"
 import { detectRoofPlanes } from "@/lib/measurement/plane-detection"
 import { AddressSuggestion } from "@/types/mapkit"
 import {
@@ -64,6 +68,29 @@ const MAP_CAMERA_SAVE_DELAY_MS = 350
 const INITIAL_MAP_CENTER = { lat: 39.5501, lng: -105.7821 }
 const INITIAL_MAP_CENTER_TOLERANCE = 0.000001
 const INITIAL_CAMERA_MISMATCH_FEET = 2_640
+
+function formatCalculationDebugNumber(value: number) {
+  return Number.isFinite(value) ? value.toFixed(9) : String(value)
+}
+
+function createLiveCalculationProject(
+  measurementSegments: MeasurementSegment[],
+  pendingLineStart: MeasurementPoint | null,
+  roofPlanes: RoofPlane[],
+  singlePitch: string,
+) {
+  const project = createEmptyProject("Live calculation")
+  const geometry = toProjectMeasurementData(
+    measurementSegments,
+    pendingLineStart,
+  )
+  project.points = geometry.points
+  project.segments = geometry.segments
+  project.planes = roofPlanes
+  project.singlePitch = singlePitch
+  return project
+}
+
 type DecisionAnchor = { x: number; y: number }
 type PointActionMenuState = {
   point: MeasurementPoint
@@ -112,7 +139,7 @@ const SEGMENT_TYPE_OPTIONS: Array<{
 function formatMeasurementLabel(lengthFeet: number, type?: MeasurementType) {
   const typeLetter =
     type === "ridge" ? "R" : type ? type.charAt(0) : ""
-  return `${Math.round(lengthFeet)}'${typeLetter}`
+  return `${roundMeasurement(lengthFeet)}'${typeLetter}`
 }
 
 function polygonLabelCenter(points: Array<{ x: number; y: number }>) {
@@ -424,15 +451,12 @@ function MapKitTestPage() {
       .filter((plane) => plane.points.length >= 3)
   }, [projectedMeasurementOverlay.points, roofPlanes])
   const liveCalculations = useMemo(() => {
-    const project = createEmptyProject("Live calculation")
-    const geometry = toProjectMeasurementData(
+    const project = createLiveCalculationProject(
       measurementSegments,
       pendingLineStart,
+      roofPlanes,
+      activeSinglePitch,
     )
-    project.points = geometry.points
-    project.segments = geometry.segments
-    project.planes = roofPlanes
-    project.singlePitch = activeSinglePitch
     return calculateProjectTotals(project)
   }, [activeSinglePitch, measurementSegments, pendingLineStart, roofPlanes])
 
@@ -1398,9 +1422,44 @@ function MapKitTestPage() {
     setSegmentTypeMenu(null)
   }
 
-  function persistRoofPlanes(nextPlanes: RoofPlane[]) {
+  function appendPitchCalculationDebug(
+    nextPlanes: RoofPlane[],
+    change: { planeId: string; previousPitch: string; nextPitch: string },
+  ) {
+    const project = createLiveCalculationProject(
+      measurementSegments,
+      pendingLineStart,
+      nextPlanes,
+      activeSinglePitch,
+    )
+    const breakdown = getProjectCalculationBreakdown(project)
+    const totals = calculateProjectTotals(project)
+    const planeMath = breakdown.planes
+      .map(
+        (plane) =>
+          `${plane.id.slice(-8)}: ${formatCalculationDebugNumber(plane.planAreaSqFt)} sq ft × ${formatCalculationDebugNumber(plane.slopeFactor)} (${plane.pitch}) = ${formatCalculationDebugNumber(plane.slopeAreaSqFt)} sq ft`,
+      )
+      .join(" | ") || "none"
+    const lineMath = breakdown.segments
+      .filter((segment) => segment.pitch !== null)
+      .map(
+        (segment) =>
+          `${segment.type} ${segment.id.slice(-8)}: ${formatCalculationDebugNumber(segment.measuredLengthFeet)} ft × ${formatCalculationDebugNumber(segment.slopeFactor)} (${segment.pitch}) = ${formatCalculationDebugNumber(segment.slopeAdjustedLengthFeet)} ft`,
+      )
+      .join(" | ") || "none"
+
+    appendPersistenceDebugNote(
+      `PITCH RECALCULATED • plane ${change.planeId.slice(-8)} ${change.previousPitch} → ${change.nextPitch} • plane math: ${planeMath} • slope-line math: ${lineMath} • totals: plan ${formatCalculationDebugNumber(totals.totalPlanAreaSqFt)} sq ft, slope ${formatCalculationDebugNumber(totals.totalSlopeAreaSqFt)} sq ft, ${formatCalculationDebugNumber(totals.totalSquares)} squares, measured line ${formatCalculationDebugNumber(totals.totalMeasuredLength)} ft, slope-adjusted line ${formatCalculationDebugNumber(totals.totalSlopeAdjustedLength)} ft`,
+    )
+  }
+
+  function persistRoofPlanes(
+    nextPlanes: RoofPlane[],
+    pitchChange?: { planeId: string; previousPitch: string; nextPitch: string },
+  ) {
     roofPlanesRef.current = nextPlanes
     setRoofPlanes(nextPlanes)
+    if (pitchChange) appendPitchCalculationDebug(nextPlanes, pitchChange)
     void saveProjectSnapshot({
       roofPlanes: nextPlanes,
       targetProjectId: currentProjectIdRef.current,
@@ -1416,24 +1475,41 @@ function MapKitTestPage() {
     const rise = Number(menu.draft)
     if (!Number.isFinite(rise) || rise < 0) return
 
+    const previousPlane = roofPlanesRef.current.find(
+      (plane) => plane.id === menu.planeId,
+    )
+    const nextPitch = `${rise}/12`
     persistRoofPlanes(
       roofPlanesRef.current.map((plane) =>
         plane.id === menu.planeId
-          ? { ...plane, pitch: `${Number(menu.draft)}/12` }
+          ? { ...plane, pitch: nextPitch }
           : plane,
       ),
+      {
+        planeId: menu.planeId,
+        previousPitch: previousPlane?.pitch ?? `fallback ${activeSinglePitch}`,
+        nextPitch,
+      },
     )
     setPlanePitchMenu(null)
   }
 
   function clearPlanePitch() {
     if (!planePitchMenu) return
+    const previousPlane = roofPlanesRef.current.find(
+      (plane) => plane.id === planePitchMenu.planeId,
+    )
     persistRoofPlanes(
       roofPlanesRef.current.map((plane) =>
         plane.id === planePitchMenu.planeId
           ? { ...plane, pitch: undefined }
           : plane,
       ),
+      {
+        planeId: planePitchMenu.planeId,
+        previousPitch: previousPlane?.pitch ?? `fallback ${activeSinglePitch}`,
+        nextPitch: `fallback ${activeSinglePitch}`,
+      },
     )
     setPlanePitchMenu(null)
   }

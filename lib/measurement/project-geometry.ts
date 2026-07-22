@@ -1,4 +1,5 @@
 import { haversineDistanceFeet } from "@/lib/measurement/geometry"
+import { roundMeasurement } from "@/lib/measurement/rounding"
 import {
   EditableMeasurementPoint as MeasurementPoint,
   EditableMeasurementSegment,
@@ -66,9 +67,11 @@ export function toProjectMeasurementData(
       type: segment.type ?? "eave",
       startPointId: startPoint.id,
       endPointId: endPoint.id,
-      lengthFeet: haversineDistanceFeet(
-        { lat: segment.start.latitude, lng: segment.start.longitude },
-        { lat: segment.end.latitude, lng: segment.end.longitude },
+      lengthFeet: roundMeasurement(
+        haversineDistanceFeet(
+          { lat: segment.start.latitude, lng: segment.start.longitude },
+          { lat: segment.end.latitude, lng: segment.end.longitude },
+        ),
       ),
       groupId: "mapkit-test",
       createdAt: now,

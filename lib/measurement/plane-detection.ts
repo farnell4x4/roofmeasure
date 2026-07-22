@@ -1,4 +1,4 @@
-import { polygonAreaSqFt } from "@/lib/measurement/geometry"
+import { roundedPolygonAreaSqFt } from "@/lib/measurement/geometry"
 import { GeographicPoint, MeasurementSegment, RoofPlane } from "@/types/models"
 
 type DirectedEdge = {
@@ -121,7 +121,7 @@ export function detectRoofPlanes(
       name: `Roof Plane ${planes.length + 1}`,
       pointIds: cycle,
       pitch: previousPitchById.get(id),
-      planAreaSqFt: polygonAreaSqFt(cyclePoints),
+      planAreaSqFt: roundedPolygonAreaSqFt(cyclePoints),
       source: "auto",
     })
   }

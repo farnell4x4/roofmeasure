@@ -6,11 +6,30 @@ import {
 } from "@/types/models";
 import {
   pitchFactor,
-  polygonAreaSqFt,
+  roundedPolygonAreaSqFt,
   slopeAdjustedAreaSqFt,
 } from "@/lib/measurement/geometry";
+import { roundMeasurement } from "@/lib/measurement/rounding";
 
 const SLOPE_ADJUSTED_LINE_TYPES = new Set(["rake", "hip", "valley"]);
+
+export type ProjectCalculationBreakdown = {
+  planes: Array<{
+    id: string;
+    pitch: string;
+    planAreaSqFt: number;
+    slopeFactor: number;
+    slopeAreaSqFt: number;
+  }>;
+  segments: Array<{
+    id: string;
+    type: MeasurementSegment["type"];
+    measuredLengthFeet: number;
+    pitch: string | null;
+    slopeFactor: number;
+    slopeAdjustedLengthFeet: number;
+  }>;
+};
 
 function emptyMeasurementTotals() {
   return {
@@ -51,35 +70,72 @@ export function slopeAdjustedSegmentLength(
   project: Project,
   segment: MeasurementSegment,
 ) {
+  const measuredLengthFeet = roundMeasurement(segment.lengthFeet);
   return SLOPE_ADJUSTED_LINE_TYPES.has(segment.type)
-    ? segment.lengthFeet * pitchFactor(segmentPitch(project, segment))
-    : segment.lengthFeet;
+    ? measuredLengthFeet * pitchFactor(segmentPitch(project, segment))
+    : measuredLengthFeet;
+}
+
+export function getProjectCalculationBreakdown(
+  project: Project,
+): ProjectCalculationBreakdown {
+  const pointMap = new Map(project.points.map((point) => [point.id, point]));
+
+  return {
+    segments: project.segments.map((segment) => {
+      const measuredLengthFeet = roundMeasurement(segment.lengthFeet);
+      const pitch = SLOPE_ADJUSTED_LINE_TYPES.has(segment.type)
+        ? segmentPitch(project, segment)
+        : null;
+      const slopeFactor = pitch ? pitchFactor(pitch) : 1;
+      return {
+        id: segment.id,
+        type: segment.type,
+        measuredLengthFeet,
+        pitch,
+        slopeFactor,
+        slopeAdjustedLengthFeet: measuredLengthFeet * slopeFactor,
+      };
+    }),
+    planes: project.planes.map((plane) => {
+      const points = plane.pointIds
+        .map((id) => pointMap.get(id))
+        .filter((point): point is NonNullable<typeof point> => Boolean(point));
+      const planAreaSqFt =
+        points.length >= 3
+          ? roundedPolygonAreaSqFt(points)
+          : roundMeasurement(plane.planAreaSqFt);
+      const pitch = plane.pitch ?? project.singlePitch ?? "0/12";
+      const slopeFactor = pitchFactor(pitch);
+      return {
+        id: plane.id,
+        pitch,
+        planAreaSqFt,
+        slopeFactor,
+        slopeAreaSqFt: slopeAdjustedAreaSqFt(planAreaSqFt, pitch),
+      };
+    }),
+  };
 }
 
 export function calculateProjectTotals(project: Project): ProjectCalculations {
   const totals = emptyMeasurementTotals();
   const slopeAdjustedTotals = emptyMeasurementTotals();
+  const breakdown = getProjectCalculationBreakdown(project);
 
-  for (const segment of project.segments) {
-    totals[segment.type] += segment.lengthFeet;
-    slopeAdjustedTotals[segment.type] += slopeAdjustedSegmentLength(
-      project,
-      segment,
-    );
+  for (const segment of breakdown.segments) {
+    totals[segment.type] += segment.measuredLengthFeet;
+    slopeAdjustedTotals[segment.type] += segment.slopeAdjustedLengthFeet;
   }
 
-  let totalPlanAreaSqFt = 0;
-  let totalSlopeAreaSqFt = 0;
-  const pointMap = new Map(project.points.map((point) => [point.id, point]));
-
-  for (const plane of project.planes) {
-    const points = plane.pointIds
-      .map((id) => pointMap.get(id))
-      .filter((point): point is NonNullable<typeof point> => Boolean(point));
-    const area = points.length >= 3 ? polygonAreaSqFt(points) : plane.planAreaSqFt;
-    totalPlanAreaSqFt += area;
-    totalSlopeAreaSqFt += slopeAdjustedAreaSqFt(area, plane.pitch ?? project.singlePitch ?? "0/12");
-  }
+  const totalPlanAreaSqFt = breakdown.planes.reduce(
+    (sum, plane) => sum + plane.planAreaSqFt,
+    0,
+  );
+  const totalSlopeAreaSqFt = breakdown.planes.reduce(
+    (sum, plane) => sum + plane.slopeAreaSqFt,
+    0,
+  );
 
   return {
     totals,
