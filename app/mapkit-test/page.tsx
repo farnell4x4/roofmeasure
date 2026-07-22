@@ -107,7 +107,6 @@ export default function MapKitTestPage() {
   const [locationAlert, setLocationAlert] = useState("");
   const [isLocationAlertDismissed, setIsLocationAlertDismissed] = useState(false);
   const superZoomActive = superZoomScale > 1;
-  const inverseSuperZoomScale = 1 / superZoomScale;
 
   const safariLocationHelp =
     'In Safari, open Website Settings for this page and change Location to "Allow", then reload this page.';
@@ -213,6 +212,14 @@ export default function MapKitTestPage() {
       x: pointOnPage.x - bounds.left,
       y: pointOnPage.y - bounds.top
     };
+  }
+
+  function projectSuperZoomX(x: number) {
+    return x * superZoomScale + superZoomOffsetX;
+  }
+
+  function projectSuperZoomY(y: number) {
+    return y * superZoomScale + superZoomOffsetY;
   }
 
   function handleTappedCoordinate(tappedPoint: MeasurementPoint, anchor: DecisionAnchor | null) {
@@ -1513,94 +1520,94 @@ export default function MapKitTestPage() {
               zIndex: 0
             }}
           />
-          {superZoomActive ? (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                zIndex: 2,
-                pointerEvents: "none"
-              }}
-            >
-              <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, overflow: "visible" }}>
-                {projectedMeasurementOverlay.segments.map((segment) => (
-                  <g key={segment.id}>
-                    <line
-                      x1={segment.startX}
-                      y1={segment.startY}
-                      x2={segment.endX}
-                      y2={segment.endY}
-                      stroke="#e0b93b"
-                      strokeWidth={3 * inverseSuperZoomScale}
-                      strokeLinecap="round"
-                      strokeDasharray={`${6 * inverseSuperZoomScale} ${6 * inverseSuperZoomScale}`}
-                    />
-                    <g transform={`translate(${segment.labelX} ${segment.labelY}) scale(${inverseSuperZoomScale})`}>
-                      <rect
-                        x={-24}
-                        y={-10}
-                        width={48}
-                        height={20}
-                        rx={10}
-                        fill="rgba(31, 37, 34, 0.82)"
-                      />
-                      <text
-                        x={0}
-                        y={3.5}
-                        fill="#fff"
-                        textAnchor="middle"
-                        fontSize="10pt"
-                        fontWeight={700}
-                      >
-                        {segment.label}
-                      </text>
-                    </g>
-                  </g>
-                ))}
-              </svg>
-              {projectedMeasurementOverlay.points.map((point) => (
-                <button
-                  key={`${point.key}:${point.tone}`}
-                  type="button"
-                  onPointerDown={(event) => handleMeasurementPointPointerDown(event, point)}
-                  onPointerMove={handleMeasurementPointPointerMove}
-                  onPointerUp={handleMeasurementPointPointerUp}
-                  onPointerCancel={handleMeasurementPointPointerCancel}
-                  style={{
-                    position: "absolute",
-                    left: point.x,
-                    top: point.y,
-                    width: 28,
-                    height: 28,
-                    transform: `translate(-50%, -50%) scale(${inverseSuperZoomScale})`,
-                    borderRadius: 999,
-                    border: 0,
-                    background: "transparent",
-                    padding: 0,
-                    cursor: "grab",
-                    pointerEvents: "auto",
-                    touchAction: "none",
-                    display: "grid",
-                    placeItems: "center"
-                  }}
-                  aria-label="Move measurement point"
-                >
-                  <span
-                    style={{
-                      display: "block",
-                      width: 10,
-                      height: 10,
-                      borderRadius: 999,
-                      border: point.tone === "pending" ? "2px solid #1f2522" : "2px solid rgba(255,255,255,0.95)",
-                      background: point.tone === "pending" ? "#ffffff" : "#1f2522",
-                      boxShadow: "0 6px 18px rgba(20, 24, 22, 0.22)"
-                    }}
-                  />
-                </button>
-              ))}
-            </div>
-          ) : null}
         </div>
+        {superZoomActive ? (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 2,
+              pointerEvents: "none"
+            }}
+          >
+            <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+              {projectedMeasurementOverlay.segments.map((segment) => (
+                <g key={segment.id}>
+                  <line
+                    x1={projectSuperZoomX(segment.startX)}
+                    y1={projectSuperZoomY(segment.startY)}
+                    x2={projectSuperZoomX(segment.endX)}
+                    y2={projectSuperZoomY(segment.endY)}
+                    stroke="#e0b93b"
+                    strokeWidth={3}
+                    strokeLinecap="round"
+                    strokeDasharray="6 6"
+                  />
+                  <g transform={`translate(${projectSuperZoomX(segment.labelX)} ${projectSuperZoomY(segment.labelY)})`}>
+                    <rect
+                      x={-24}
+                      y={-10}
+                      width={48}
+                      height={20}
+                      rx={10}
+                      fill="rgba(31, 37, 34, 0.82)"
+                    />
+                    <text
+                      x={0}
+                      y={3.5}
+                      fill="#fff"
+                      textAnchor="middle"
+                      fontSize="10pt"
+                      fontWeight={700}
+                    >
+                      {segment.label}
+                    </text>
+                  </g>
+                </g>
+              ))}
+            </svg>
+            {projectedMeasurementOverlay.points.map((point) => (
+              <button
+                key={`${point.key}:${point.tone}`}
+                type="button"
+                onPointerDown={(event) => handleMeasurementPointPointerDown(event, point)}
+                onPointerMove={handleMeasurementPointPointerMove}
+                onPointerUp={handleMeasurementPointPointerUp}
+                onPointerCancel={handleMeasurementPointPointerCancel}
+                style={{
+                  position: "absolute",
+                  left: projectSuperZoomX(point.x),
+                  top: projectSuperZoomY(point.y),
+                  width: 28,
+                  height: 28,
+                  transform: "translate(-50%, -50%)",
+                  borderRadius: 999,
+                  border: 0,
+                  background: "transparent",
+                  padding: 0,
+                  cursor: "grab",
+                  pointerEvents: "auto",
+                  touchAction: "none",
+                  display: "grid",
+                  placeItems: "center"
+                }}
+                aria-label="Move measurement point"
+              >
+                <span
+                  style={{
+                    display: "block",
+                    width: 10,
+                    height: 10,
+                    borderRadius: 999,
+                    border: point.tone === "pending" ? "2px solid #1f2522" : "2px solid rgba(255,255,255,0.95)",
+                    background: point.tone === "pending" ? "#ffffff" : "#1f2522",
+                    boxShadow: "0 6px 18px rgba(20, 24, 22, 0.22)"
+                  }}
+                />
+              </button>
+            ))}
+          </div>
+        ) : null}
         {superZoomActive ? (
           <div
             onPointerDown={handleSuperZoomPointerDown}
