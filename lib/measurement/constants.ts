@@ -1,6 +1,6 @@
 import { MeasurementType } from "@/types/models";
 
-export const PRODUCT_NAME = "RoofMeasure";
+export const PRODUCT_NAME = "Roof Tape Measure";
 
 export const MEASUREMENT_TYPES: Array<{
   type: MeasurementType;
@@ -11,7 +11,8 @@ export const MEASUREMENT_TYPES: Array<{
   { type: "valley", label: "Valley", color: "#4d8f87" },
   { type: "rake", label: "Rake", color: "#7f6ab3" },
   { type: "hip", label: "Hip", color: "#cb4e59" },
-  { type: "ridge", label: "Ridge", color: "#2863b6" }
+  { type: "ridge", label: "Ridge", color: "#2863b6" },
+  { type: "wall", label: "Wall", color: "#5d7183" }
 ];
 
 export const DEFAULT_CAMERA = {

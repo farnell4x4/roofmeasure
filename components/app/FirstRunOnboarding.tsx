@@ -24,7 +24,7 @@ const ONBOARDING_STEPS = [
     </span>
   </>,
   <>Tap on map to place tape.</>,
-  <>Tap on displayed ft marker to assign type: ridge, hip, valley, rake, eave.</>,
+  <>Tap on displayed ft marker to assign type: ridge, hip, valley, rake, eave, or wall.</>,
   <>
     For best accuracy, tap around each roof plane. Planes turn blue when
     completed.

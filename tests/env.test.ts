@@ -21,7 +21,7 @@ describe("runtime env helpers", () => {
   it("prefers Cloudflare runtime bindings when available", async () => {
     getCloudflareContextMock.mockResolvedValue({
       env: {
-        NEXT_PUBLIC_APP_NAME: "RoofMeasure CF",
+        NEXT_PUBLIC_APP_NAME: "Roof Tape Measure CF",
         NEXT_PUBLIC_MAPKIT_JS_KEY: "public-from-cf",
         MAPKIT_TEAM_ID: "team-from-cf",
         MAPKIT_KEY_ID: "key-from-cf",
@@ -29,7 +29,7 @@ describe("runtime env helpers", () => {
       }
     });
 
-    process.env.NEXT_PUBLIC_APP_NAME = "RoofMeasure Local";
+    process.env.NEXT_PUBLIC_APP_NAME = "Roof Tape Measure Local";
     process.env.NEXT_PUBLIC_MAPKIT_JS_KEY = "public-from-process";
     process.env.MAPKIT_TEAM_ID = "team-from-process";
     process.env.MAPKIT_KEY_ID = "key-from-process";
@@ -38,7 +38,7 @@ describe("runtime env helpers", () => {
     const { getEnv } = await import("@/lib/config/env");
     const env = await getEnv();
 
-    expect(env.appName).toBe("RoofMeasure CF");
+    expect(env.appName).toBe("Roof Tape Measure CF");
     expect(env.mapKit.publicKey).toBe("public-from-cf");
     expect(env.mapKit.teamId).toBe("team-from-cf");
     expect(env.mapKit.keyId).toBe("key-from-cf");
@@ -49,7 +49,7 @@ describe("runtime env helpers", () => {
   it("falls back to process.env when Cloudflare context is unavailable", async () => {
     getCloudflareContextMock.mockRejectedValue(new Error("no cloudflare context"));
 
-    process.env.NEXT_PUBLIC_APP_NAME = "RoofMeasure Local";
+    process.env.NEXT_PUBLIC_APP_NAME = "Roof Tape Measure Local";
     process.env.NEXT_PUBLIC_MAPKIT_JS_KEY = "public-local";
     process.env.MAPKIT_TEAM_ID = "team-local";
     process.env.MAPKIT_KEY_ID = "key-local";
@@ -59,7 +59,7 @@ describe("runtime env helpers", () => {
     const env = await getRuntimeEnvSnapshot();
 
     expect(env).toEqual({
-      NEXT_PUBLIC_APP_NAME: "RoofMeasure Local",
+      NEXT_PUBLIC_APP_NAME: "Roof Tape Measure Local",
       NEXT_PUBLIC_MAPKIT_JS_KEY: "public-local",
       MAPKIT_TEAM_ID: "team-local",
       MAPKIT_KEY_ID: "key-local",

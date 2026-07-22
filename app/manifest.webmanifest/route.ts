@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 export function GET() {
   return NextResponse.json({
-    name: "RoofMeasure",
-    short_name: "RoofMeasure",
+    name: "Roof Tape Measure",
+    short_name: "Roof Tape Measure",
     description: "Local-first roof measurement for field estimators.",
     start_url: "/",
     display: "standalone",

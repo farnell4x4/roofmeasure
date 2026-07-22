@@ -7,13 +7,13 @@ import { PageZoomGuard } from "@/components/app/PageZoomGuard";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "RoofMeasure",
+  title: "Roof Tape Measure",
   description: "Premium local-first roof measurement for contractors and estimators.",
-  applicationName: "RoofMeasure",
+  applicationName: "Roof Tape Measure",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "RoofMeasure"
+    title: "Roof Tape Measure"
   },
   manifest: "/manifest.webmanifest",
   icons: {

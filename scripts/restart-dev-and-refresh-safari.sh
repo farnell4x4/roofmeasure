@@ -37,11 +37,11 @@ ATTEMPTS=0
 until curl -I "$READY_URL" >/dev/null 2>&1; do
   ATTEMPTS=$((ATTEMPTS + 1))
   if ! kill -0 "$DEV_PID" 2>/dev/null; then
-    echo "RoofMeasure dev server exited before becoming ready. Check $LOG_FILE"
+    echo "Roof Tape Measure dev server exited before becoming ready. Check $LOG_FILE"
     exit 1
   fi
   if [ "$ATTEMPTS" -ge 60 ]; then
-    echo "RoofMeasure dev server did not become ready. Check $LOG_FILE"
+    echo "Roof Tape Measure dev server did not become ready. Check $LOG_FILE"
     exit 1
   fi
   sleep 1
@@ -85,7 +85,7 @@ tell application "Safari"
 end tell
 EOF
 
-echo "RoofMeasure restarted in the VS Code terminal and Safari refreshed at $APP_URL"
+echo "Roof Tape Measure restarted in the VS Code terminal and Safari refreshed at $APP_URL"
 echo "Streaming dev server logs from $LOG_FILE"
 
 tail -f "$LOG_FILE"

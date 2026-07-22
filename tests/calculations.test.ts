@@ -133,6 +133,32 @@ describe("project totals", () => {
     expect(totals.slopeAdjustedTotals.rake).toBe(11);
   });
 
+  it("treats typed walls as pitch-adjusted slope sides", () => {
+    const project = createEmptyProject("Wall slope adjustment");
+    project.singlePitch = "6/12";
+    project.segments = [
+      { id: "wall-1", type: "wall", startPointId: "a", endPointId: "b", lengthFeet: 18, groupId: "g1", createdAt: "", updatedAt: "" },
+      { id: "eave", type: "eave", startPointId: "b", endPointId: "c", lengthFeet: 65, groupId: "g1", createdAt: "", updatedAt: "" },
+      { id: "wall-2", type: "wall", startPointId: "c", endPointId: "d", lengthFeet: 18, groupId: "g1", createdAt: "", updatedAt: "" },
+      { id: "ridge", type: "ridge", startPointId: "d", endPointId: "a", lengthFeet: 65, groupId: "g1", createdAt: "", updatedAt: "" },
+    ];
+    project.planes = [
+      {
+        id: "p1",
+        name: "Roof Plane 1",
+        pointIds: ["a", "b", "c", "d"],
+        planAreaSqFt: 1170,
+        source: "manual",
+      },
+    ];
+
+    const totals = calculateProjectTotals(project);
+
+    expect(totals.totals.wall).toBe(36);
+    expect(totals.slopeAdjustedTotals.wall).toBeCloseTo(36 * Math.sqrt(1.25), 10);
+    expect(totals.totalSlopeAreaSqFt).toBeCloseTo(1170 * Math.sqrt(1.25), 10);
+  });
+
   it("uses rounded rectangle side labels before applying its pitch factor", () => {
     const project = createEmptyProject("Rounded plane area");
     project.singlePitch = "6/12";

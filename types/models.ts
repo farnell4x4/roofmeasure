@@ -1,6 +1,6 @@
 export const SCHEMA_VERSION = 1;
 
-export type MeasurementType = "eave" | "valley" | "rake" | "hip" | "ridge";
+export type MeasurementType = "eave" | "valley" | "rake" | "hip" | "ridge" | "wall";
 export type UnitSystem = "imperial" | "metric";
 export type PitchMode = "single" | "multiple";
 export type MeasureContinuationMode = "continuous" | "new-line";

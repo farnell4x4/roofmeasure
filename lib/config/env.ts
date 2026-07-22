@@ -1,6 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
-const DEFAULT_APP_NAME = "RoofMeasure";
+const DEFAULT_APP_NAME = "Roof Tape Measure";
 
 export const requiredMapKitEnvKeys = [
   "NEXT_PUBLIC_MAPKIT_JS_KEY",

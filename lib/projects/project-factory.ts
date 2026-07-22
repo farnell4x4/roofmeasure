@@ -16,7 +16,7 @@ export function createEmptyProject(name: string): Project {
     pitchMode: "single",
     singlePitch: "6/12",
     reportSettings: {
-      showMeasurementTypes: ["eave", "valley", "rake", "hip", "ridge"],
+      showMeasurementTypes: ["eave", "valley", "rake", "hip", "ridge", "wall"],
       notes: "",
       includeWaste: true
     },

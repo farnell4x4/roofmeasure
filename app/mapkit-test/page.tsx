@@ -137,6 +137,7 @@ const SEGMENT_TYPE_OPTIONS: Array<{
   { type: "valley", label: "Valley" },
   { type: "rake", label: "Rake" },
   { type: "eave", label: "Eave" },
+  { type: "wall", label: "Wall" },
 ]
 
 function formatMeasurementLabel(lengthFeet: number, type?: MeasurementType) {
@@ -415,6 +416,10 @@ function MapKitTestPage() {
     useState<PlanePitchMenuState | null>(null)
   const [segmentTypeMenu, setSegmentTypeMenu] =
     useState<SegmentTypeMenuState | null>(null)
+  const [reportTypeAlert, setReportTypeAlert] = useState<
+    "assign-types" | "type-confirmed" | null
+  >(null)
+  const [showNilTypeHighlights, setShowNilTypeHighlights] = useState(false)
   const [roofPlanes, setRoofPlanes] = useState<RoofPlane[]>([])
   const [activeSinglePitch, setActiveSinglePitch] = useState("6/12")
   const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] =
@@ -463,6 +468,10 @@ function MapKitTestPage() {
     )
     return calculateProjectTotals(project)
   }, [activeSinglePitch, measurementSegments, pendingLineStart, roofPlanes])
+  const untypedSegmentCount = useMemo(
+    () => measurementSegments.filter((segment) => !segment.type).length,
+    [measurementSegments],
+  )
 
   const safariLocationHelp =
     'In Safari, open Website Settings for this page and change Location to "Allow", then reload this page.'
@@ -1395,7 +1404,7 @@ function MapKitTestPage() {
   }
 
   function openSegmentTypeMenu(
-    event: React.MouseEvent<SVGTextElement>,
+    event: React.MouseEvent<SVGElement>,
     segment: ProjectedMeasurementOverlay["segments"][number],
   ) {
     event.preventDefault()
@@ -1426,6 +1435,36 @@ function MapKitTestPage() {
     setSegmentTypeMenu(null)
   }
 
+  function closeReportTypeAlert() {
+    setReportTypeAlert(null)
+    setShowNilTypeHighlights(true)
+  }
+
+  function requestReport() {
+    if (untypedSegmentCount > 0) {
+      setShowNilTypeHighlights(false)
+      setReportTypeAlert("assign-types")
+      return
+    }
+    setShowNilTypeHighlights(false)
+    const currentId = currentProjectIdRef.current
+    if (currentId) {
+      router.push(`/report?projectId=${encodeURIComponent(currentId)}`)
+      return
+    }
+
+    void saveProjectSnapshot({
+      measurementSegments,
+      pendingLineStart,
+      roofPlanes,
+      debugReason: "measurement",
+    }).then((savedProject) => {
+      if (savedProject) {
+        router.push(`/report?projectId=${encodeURIComponent(savedProject.id)}`)
+      }
+    })
+  }
+
   function appendPitchCalculationDebug(
     nextPlanes: RoofPlane[],
     change: { planeId: string; previousPitch: string; nextPitch: string },
@@ -1451,7 +1490,7 @@ function MapKitTestPage() {
               `${index + 1}. ${segment.type ?? "nil"} ${formatCalculationDebugNumber(segment.measuredLengthFeet)} ft`,
           )
           .join(" • ") || "none"
-        const lengthsByType = ["ridge", "eave", "rake", "valley", "hip", "nil"]
+        const lengthsByType = ["ridge", "eave", "rake", "valley", "hip", "wall", "nil"]
           .map((type) => {
             const lengths = plane.boundarySegments
               .filter((segment) => (segment.type ?? "nil") === type)
@@ -1464,7 +1503,7 @@ function MapKitTestPage() {
           `Plane ${sourcePlane?.name ?? plane.id.slice(-8)} (${plane.id.slice(-8)})`,
           `  vertices: ${sourcePlane?.pointIds.length ?? 0}`,
           `  pitch used: ${plane.pitch} (${pitchSource})`,
-          `  pitch adjustment: ${plane.pitchApplied ? "applied" : "not applied — all boundary sides must be typed and at least two must be rake, hip, or valley"}`,
+          `  pitch adjustment: ${plane.pitchApplied ? "applied" : "not applied — all boundary sides must be typed and at least two must be rake, hip, valley, or wall"}`,
           `  individual side lengths: ${individualSides}`,
           lengthsByType,
           `  plan area used: ${formatCalculationDebugNumber(plane.planAreaSqFt)} sq ft`,
@@ -1527,21 +1566,19 @@ function MapKitTestPage() {
     setPlanePitchMenu(null)
   }
 
-  function clearPlanePitch() {
-    if (!planePitchMenu) return
-    const previousPlane = roofPlanesRef.current.find(
-      (plane) => plane.id === planePitchMenu.planeId,
-    )
+  function saveAllPlanePitches() {
+    const menu = planePitchMenu
+    if (!menu) return
+    const rise = Number(menu.draft)
+    if (!Number.isFinite(rise) || rise < 0) return
+
+    const nextPitch = `${rise}/12`
     persistRoofPlanes(
-      roofPlanesRef.current.map((plane) =>
-        plane.id === planePitchMenu.planeId
-          ? { ...plane, pitch: undefined }
-          : plane,
-      ),
+      roofPlanesRef.current.map((plane) => ({ ...plane, pitch: nextPitch })),
       {
-        planeId: planePitchMenu.planeId,
-        previousPitch: previousPlane?.pitch ?? `fallback ${activeSinglePitch}`,
-        nextPitch: `fallback ${activeSinglePitch}`,
+        planeId: menu.planeId,
+        previousPitch: "all planes",
+        nextPitch,
       },
     )
     setPlanePitchMenu(null)
@@ -3118,8 +3155,9 @@ function MapKitTestPage() {
             </button>
             <button
               type="button"
-              onClick={clearPlanePitch}
+              onClick={saveAllPlanePitches}
               style={{
+                flex: 1,
                 border: 0,
                 borderRadius: 10,
                 padding: "8px 10px",
@@ -3128,7 +3166,7 @@ function MapKitTestPage() {
                 cursor: "pointer",
               }}
             >
-              Clear
+              Save All
             </button>
           </div>
         </form>
@@ -3177,21 +3215,26 @@ function MapKitTestPage() {
         </div>
       ) : null}
       {liveCalculations.segmentCount > 0 ? (
-        <div
-          className="chip"
+        <button
+          type="button"
+          onClick={requestReport}
           style={{
             position: "absolute",
             right: 14,
             bottom: 14,
             zIndex: 3,
+            border: 0,
+            borderRadius: 999,
+            padding: "8px 12px",
             background: "rgba(31, 37, 34, 0.88)",
             color: "#fff",
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: "pointer",
           }}
         >
-          {liveCalculations.totalSlopeAreaSqFt > 0
-            ? `${Math.round(liveCalculations.totalSlopeAreaSqFt).toLocaleString()} sq ft`
-            : `${liveCalculations.totalSlopeAdjustedLength.toFixed(1)} ft adjusted`}
-        </div>
+          View Report
+        </button>
       ) : null}
       <div
         ref={mapViewportRef}
@@ -3307,6 +3350,18 @@ function MapKitTestPage() {
                       strokeDasharray="6 6"
                     />
                     <g transform={`translate(${labelX} ${labelY})`}>
+                      {showNilTypeHighlights && !segment.type ? (
+                        <circle
+                          cx={0}
+                          cy={0}
+                          r={15}
+                          fill="rgba(200, 54, 42, 0.9)"
+                          stroke="rgba(255, 255, 255, 0.88)"
+                          strokeWidth={1.5}
+                          style={{ pointerEvents: "auto", cursor: "pointer" }}
+                          onClick={(event) => openSegmentTypeMenu(event, segment)}
+                        />
+                      ) : null}
                       <text
                         x={0}
                         y={3.5}
@@ -3400,6 +3455,130 @@ function MapKitTestPage() {
           />
         ) : null}
       </div>
+      {reportTypeAlert ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="report-type-alert-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 20,
+            display: "grid",
+            placeItems: "center",
+            padding: 20,
+            background: "rgba(20, 24, 22, 0.42)",
+          }}
+        >
+          {reportTypeAlert === "assign-types" ? (
+            <section
+              style={{
+                width: "min(400px, 100%)",
+                display: "grid",
+                gap: 16,
+                overflow: "hidden",
+                borderRadius: 20,
+                background: "#fff",
+                boxShadow: "0 20px 50px rgba(20, 24, 22, 0.28)",
+              }}
+            >
+              <div style={{ display: "grid", gap: 8, padding: "20px 20px 0" }}>
+                <h2 id="report-type-alert-title" style={{ margin: 0, color: "#1f2522", fontSize: 19 }}>
+                  Assign each line a type
+                </h2>
+                <p style={{ margin: 0, color: "#5f685f", fontSize: 14, lineHeight: 1.5 }}>
+                  Before viewing the report, tap the foot count on every map line and choose its type: ridge, hip, valley, rake, eave, or wall.
+                </p>
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  padding: "14px 20px 20px",
+                  borderTop: "1px solid rgba(31, 37, 34, 0.1)",
+                  background: "#f7f6f1",
+                }}
+              >
+                <span style={{ color: "#5f685f", fontSize: 12, fontWeight: 700 }}>
+                  Tap a foot count like this:
+                </span>
+                <svg viewBox="0 0 260 52" width="100%" height="52" aria-label="Example measurement line">
+                  <line x1="38" y1="26" x2="222" y2="26" stroke="#e0b93b" strokeWidth="3" strokeLinecap="round" strokeDasharray="6 6" />
+                  <circle cx="38" cy="26" r="5" fill="#1f2522" stroke="rgba(255,255,255,0.95)" strokeWidth="2" />
+                  <circle cx="222" cy="26" r="5" fill="#1f2522" stroke="rgba(255,255,255,0.95)" strokeWidth="2" />
+                  <circle cx="130" cy="26" r="15" fill="rgba(200, 54, 42, 0.9)" stroke="rgba(255, 255, 255, 0.88)" strokeWidth="1.5" />
+                  <line x1="116" y1="35" x2="144" y2="35" stroke="#4169e1" strokeWidth="1" />
+                  <text
+                    x="130"
+                    y="31"
+                    fill="#ffff00"
+                    textAnchor="middle"
+                    fontSize="15"
+                    fontWeight="700"
+                    style={{ cursor: "pointer", pointerEvents: "auto" }}
+                    onClick={() => setReportTypeAlert("type-confirmed")}
+                  >
+                    15&apos;
+                  </text>
+                </svg>
+                <button
+                  type="button"
+                  onClick={closeReportTypeAlert}
+                  style={{
+                    justifySelf: "end",
+                    border: 0,
+                    borderRadius: 10,
+                    padding: "9px 14px",
+                    background: "#1f2522",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Okay
+                </button>
+              </div>
+            </section>
+          ) : (
+            <section
+              style={{
+                width: "min(360px, 100%)",
+                display: "grid",
+                gap: 16,
+                padding: 20,
+                borderRadius: 20,
+                background: "#fff",
+                boxShadow: "0 20px 50px rgba(20, 24, 22, 0.28)",
+              }}
+            >
+              <h2 id="report-type-alert-title" style={{ margin: 0, color: "#1f2522", fontSize: 19 }}>
+                That&apos;s right!
+              </h2>
+              <p style={{ margin: 0, color: "#5f685f", fontSize: 14, lineHeight: 1.5 }}>
+                Now do that on the real map lines.
+              </p>
+              <button
+                type="button"
+                onClick={closeReportTypeAlert}
+                style={{
+                  justifySelf: "end",
+                  border: 0,
+                  borderRadius: 10,
+                  padding: "9px 14px",
+                  background: "#1f2522",
+                  color: "#fff",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Okay
+              </button>
+            </section>
+          )}
+        </div>
+      ) : null}
       <FirstRunOnboarding replayVersion={tutorialReplayVersion} />
     </main>
   )

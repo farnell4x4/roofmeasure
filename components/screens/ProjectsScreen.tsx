@@ -1,6 +1,6 @@
 "use client"
 
-import { Copy, Download, FolderOpen, Plus, Trash2, Upload } from "lucide-react"
+import { FileText, FolderOpen, Plus, Trash2, Upload } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/Button"
@@ -59,25 +59,6 @@ export function ProjectsScreen() {
     await refresh()
   }
 
-  async function handleDuplicateProject(id: string) {
-    const project = await db.getProject(id)
-    if (!project) return
-    await db.duplicateProject(project)
-    push({ title: "Project duplicated.", tone: "success" })
-    await refresh()
-  }
-
-  async function handleExportProject(id: string) {
-    const payload = await db.exportProject(id)
-    if (!payload) return
-    const blob = new Blob([payload], { type: "application/json" })
-    const link = document.createElement("a")
-    link.href = URL.createObjectURL(blob)
-    link.download = `roofmeasure-${id}.json`
-    link.click()
-    URL.revokeObjectURL(link.href)
-  }
-
   async function handleImportProject(
     event: React.ChangeEvent<HTMLInputElement>,
   ) {
@@ -104,7 +85,7 @@ export function ProjectsScreen() {
           <p className="chip">Saved Projects</p>
           <h1 style={{ marginBottom: 8 }}>Local projects and reports</h1>
           <p style={{ color: "var(--muted)", margin: 0 }}>
-            Search, sort, duplicate, export, or reopen any locally stored roof
+            Search, sort, view a report, or reopen any locally stored roof
             measurement project.
           </p>
         </div>
@@ -207,15 +188,9 @@ export function ProjectsScreen() {
                 </Button>
                 <Button
                   variant="secondary"
-                  onClick={() => handleDuplicateProject(project.id)}
+                  onClick={() => router.push(`/report?projectId=${project.id}`)}
                 >
-                  <Copy size={18} /> Duplicate
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => handleExportProject(project.id)}
-                >
-                  <Download size={18} /> Export
+                  <FileText size={18} /> View Report
                 </Button>
                 <Button
                   variant="danger"

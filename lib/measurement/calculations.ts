@@ -9,7 +9,7 @@ import {
 } from "@/lib/measurement/geometry";
 import { roundMeasurement } from "@/lib/measurement/rounding";
 
-const SLOPE_ADJUSTED_LINE_TYPES = new Set(["rake", "hip", "valley"]);
+const SLOPE_ADJUSTED_LINE_TYPES = new Set(["rake", "hip", "valley", "wall"]);
 
 export type ProjectCalculationBreakdown = {
   planes: Array<{
@@ -42,6 +42,7 @@ function emptyMeasurementTotals() {
     rake: 0,
     hip: 0,
     ridge: 0,
+    wall: 0,
   };
 }
 
