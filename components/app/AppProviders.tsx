@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { PersistenceDebugOverlay } from "@/components/app/PersistenceDebugOverlay";
+import { CalculationDebugOverlay } from "@/components/app/CalculationDebugOverlay";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
@@ -14,7 +14,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   return (
     <ToastProvider>
       {children}
-      <PersistenceDebugOverlay />
+      <CalculationDebugOverlay />
     </ToastProvider>
   );
 }

@@ -2,12 +2,10 @@ import {
   MeasurementSegment,
   Project,
   ProjectCalculations,
-  RoofPlane,
 } from "@/types/models";
 import {
   pitchFactor,
   roundedPolygonAreaSqFt,
-  slopeAdjustedAreaSqFt,
 } from "@/lib/measurement/geometry";
 import { roundMeasurement } from "@/lib/measurement/rounding";
 
@@ -17,9 +15,15 @@ export type ProjectCalculationBreakdown = {
   planes: Array<{
     id: string;
     pitch: string;
+    pitchApplied: boolean;
     planAreaSqFt: number;
     slopeFactor: number;
     slopeAreaSqFt: number;
+    boundarySegments: Array<{
+      id: string | null;
+      type: MeasurementSegment["type"] | null;
+      measuredLengthFeet: number;
+    }>;
   }>;
   segments: Array<{
     id: string;
@@ -41,51 +45,102 @@ function emptyMeasurementTotals() {
   };
 }
 
-function planeContainsSegment(plane: RoofPlane, segment: MeasurementSegment) {
-  return plane.pointIds.some((pointId, index) => {
-    const nextPointId = plane.pointIds[(index + 1) % plane.pointIds.length];
-    return (
-      (pointId === segment.startPointId && nextPointId === segment.endPointId) ||
-      (pointId === segment.endPointId && nextPointId === segment.startPointId)
-    );
-  });
-}
-
-/**
- * A hip or valley can belong to two planes. Until full 3D intersections are
- * modeled, use the steeper adjoining plane so the calculated material length
- * is never understated.
- */
-function segmentPitch(project: Project, segment: MeasurementSegment) {
-  const pitches = project.planes
-    .filter((plane) => planeContainsSegment(plane, segment))
-    .map((plane) => plane.pitch ?? project.singlePitch ?? "0/12");
-
-  return pitches.sort((left, right) => pitchFactor(right) - pitchFactor(left))[0] ??
-    project.singlePitch ??
-    "0/12";
+function boundaryKey(startPointId: string, endPointId: string) {
+  return [startPointId, endPointId].sort().join("|");
 }
 
 export function slopeAdjustedSegmentLength(
   project: Project,
   segment: MeasurementSegment,
 ) {
-  const measuredLengthFeet = roundMeasurement(segment.lengthFeet);
-  return SLOPE_ADJUSTED_LINE_TYPES.has(segment.type)
-    ? measuredLengthFeet * pitchFactor(segmentPitch(project, segment))
-    : measuredLengthFeet;
+  return getProjectCalculationBreakdown(project).segments.find(
+    (item) => item.id === segment.id,
+  )?.slopeAdjustedLengthFeet ?? roundMeasurement(segment.lengthFeet);
 }
 
 export function getProjectCalculationBreakdown(
   project: Project,
 ): ProjectCalculationBreakdown {
   const pointMap = new Map(project.points.map((point) => [point.id, point]));
+  const segmentByBoundary = new Map(
+    project.segments.map((segment) => [
+      boundaryKey(segment.startPointId, segment.endPointId),
+      segment,
+    ]),
+  );
+  const rawTypeBySegmentId = new Map(
+    project.measurementGeometry?.segments.map((segment) => [
+      segment.id,
+      segment.type,
+    ]) ?? [],
+  );
+  const pitchesBySlopeSegmentId = new Map<string, string[]>();
+
+  const planes = project.planes.map((plane) => {
+    const points = plane.pointIds
+      .map((id) => pointMap.get(id))
+      .filter((point): point is NonNullable<typeof point> => Boolean(point));
+    const planAreaSqFt =
+      points.length >= 3
+        ? roundedPolygonAreaSqFt(points)
+        : roundMeasurement(plane.planAreaSqFt);
+    const pitch = plane.pitch ?? project.singlePitch ?? "0/12";
+    const boundarySegments = plane.pointIds.map((pointId, index) => {
+      const nextPointId = plane.pointIds[(index + 1) % plane.pointIds.length];
+      const segment = segmentByBoundary.get(boundaryKey(pointId, nextPointId));
+      const type = segment
+        ? rawTypeBySegmentId.has(segment.id)
+          ? rawTypeBySegmentId.get(segment.id) ?? null
+          : segment.type
+        : null;
+      return {
+        id: segment?.id ?? null,
+        type,
+        measuredLengthFeet: segment ? roundMeasurement(segment.lengthFeet) : 0,
+      };
+    });
+    const pitchApplied =
+      boundarySegments.length > 0 &&
+      boundarySegments.every((segment) => segment.id && segment.type) &&
+      boundarySegments.filter(
+        (segment) => segment.type && SLOPE_ADJUSTED_LINE_TYPES.has(segment.type),
+      ).length >= 2;
+    const slopeFactor = pitchApplied ? pitchFactor(pitch) : 1;
+
+    if (pitchApplied) {
+      for (const segment of boundarySegments) {
+        if (
+          !segment.id ||
+          !segment.type ||
+          !SLOPE_ADJUSTED_LINE_TYPES.has(segment.type)
+        ) {
+          continue;
+        }
+        pitchesBySlopeSegmentId.set(segment.id, [
+          ...(pitchesBySlopeSegmentId.get(segment.id) ?? []),
+          pitch,
+        ]);
+      }
+    }
+
+    return {
+      id: plane.id,
+      pitch,
+      pitchApplied,
+      planAreaSqFt,
+      slopeFactor,
+      slopeAreaSqFt: planAreaSqFt * slopeFactor,
+      boundarySegments,
+    };
+  });
 
   return {
+    planes,
     segments: project.segments.map((segment) => {
       const measuredLengthFeet = roundMeasurement(segment.lengthFeet);
-      const pitch = SLOPE_ADJUSTED_LINE_TYPES.has(segment.type)
-        ? segmentPitch(project, segment)
+      const pitches = pitchesBySlopeSegmentId.get(segment.id) ?? [];
+      const pitch = SLOPE_ADJUSTED_LINE_TYPES.has(segment.type) && pitches.length
+        ? pitches.sort((left, right) => pitchFactor(right) - pitchFactor(left))[0]
         : null;
       const slopeFactor = pitch ? pitchFactor(pitch) : 1;
       return {
@@ -95,24 +150,6 @@ export function getProjectCalculationBreakdown(
         pitch,
         slopeFactor,
         slopeAdjustedLengthFeet: measuredLengthFeet * slopeFactor,
-      };
-    }),
-    planes: project.planes.map((plane) => {
-      const points = plane.pointIds
-        .map((id) => pointMap.get(id))
-        .filter((point): point is NonNullable<typeof point> => Boolean(point));
-      const planAreaSqFt =
-        points.length >= 3
-          ? roundedPolygonAreaSqFt(points)
-          : roundMeasurement(plane.planAreaSqFt);
-      const pitch = plane.pitch ?? project.singlePitch ?? "0/12";
-      const slopeFactor = pitchFactor(pitch);
-      return {
-        id: plane.id,
-        pitch,
-        planAreaSqFt,
-        slopeFactor,
-        slopeAreaSqFt: slopeAdjustedAreaSqFt(planAreaSqFt, pitch),
       };
     }),
   };
@@ -152,6 +189,6 @@ export function calculateProjectTotals(project: Project): ProjectCalculations {
     totalSlopeAreaSqFt,
     totalSquares: totalSlopeAreaSqFt / 100,
     planeCount: project.planes.length,
-    segmentCount: project.segments.length
+    segmentCount: project.segments.length,
   };
 }

@@ -12,7 +12,7 @@ import { roundMeasurement } from "@/lib/measurement/rounding";
 import { createEmptyProject } from "@/lib/projects/project-factory";
 
 describe("project totals", () => {
-  it("sums linear totals and plane totals", () => {
+  it("keeps a plane flat until its boundary types establish slope direction", () => {
     const project = createEmptyProject("Demo");
     project.points = [
       { id: "a", lat: 39.7392, lng: -104.9903 },
@@ -44,19 +44,39 @@ describe("project totals", () => {
     ];
     const totals = calculateProjectTotals(project);
     expect(totals.totals.eave).toBe(10);
-    expect(totals.totalSlopeAreaSqFt).toBeGreaterThan(totals.totalPlanAreaSqFt);
+    expect(totals.totalSlopeAreaSqFt).toBe(totals.totalPlanAreaSqFt);
   });
 
-  it("derives rake, hip, and valley lengths from pitch without changing measurements", () => {
+  it("applies pitch only after every boundary side is typed", () => {
     const project = createEmptyProject("Slope adjustment");
-    project.singlePitch = "4/12";
+    project.singlePitch = "6/12";
     project.segments = [
       {
         id: "rake",
         type: "rake",
         startPointId: "a",
         endPointId: "b",
-        lengthFeet: 10,
+        lengthFeet: 18,
+        groupId: "g1",
+        createdAt: "",
+        updatedAt: "",
+      },
+      {
+        id: "eave",
+        type: "eave",
+        startPointId: "b",
+        endPointId: "c",
+        lengthFeet: 65,
+        groupId: "g1",
+        createdAt: "",
+        updatedAt: "",
+      },
+      {
+        id: "second-rake",
+        type: "rake",
+        startPointId: "c",
+        endPointId: "d",
+        lengthFeet: 18,
         groupId: "g1",
         createdAt: "",
         updatedAt: "",
@@ -64,23 +84,34 @@ describe("project totals", () => {
       {
         id: "ridge",
         type: "ridge",
-        startPointId: "b",
-        endPointId: "c",
-        lengthFeet: 10,
+        startPointId: "d",
+        endPointId: "a",
+        lengthFeet: 65,
         groupId: "g1",
         createdAt: "",
         updatedAt: "",
       },
     ];
+    project.planes = [
+      {
+        id: "p1",
+        name: "Roof Plane 1",
+        pointIds: ["a", "b", "c", "d"],
+        planAreaSqFt: 1170,
+        source: "manual",
+      },
+    ];
 
     const totals = calculateProjectTotals(project);
 
-    expect(totals.totals.rake).toBe(10);
-    expect(totals.slopeAdjustedTotals.rake).toBeCloseTo(10.54, 2);
-    expect(totals.slopeAdjustedTotals.ridge).toBe(10);
+    expect(totals.totals.rake).toBe(36);
+    expect(totals.slopeAdjustedTotals.rake).toBeCloseTo(36 * Math.sqrt(1.25), 10);
+    expect(totals.slopeAdjustedTotals.eave).toBe(65);
+    expect(totals.slopeAdjustedTotals.ridge).toBe(65);
+    expect(totals.totalSlopeAreaSqFt).toBeCloseTo(1170 * Math.sqrt(1.25), 10);
   });
 
-  it("uses the whole-foot overlay measurement as the calculation input", () => {
+  it("uses the whole-foot overlay measurement without guessing a slope from an incomplete boundary", () => {
     const project = createEmptyProject("Rounded measurement");
     project.singlePitch = "6/12";
     project.segments = [
@@ -99,10 +130,7 @@ describe("project totals", () => {
     const totals = calculateProjectTotals(project);
 
     expect(totals.totals.rake).toBe(11);
-    expect(totals.slopeAdjustedTotals.rake).toBeCloseTo(
-      11 * Math.sqrt(1.25),
-      10,
-    );
+    expect(totals.slopeAdjustedTotals.rake).toBe(11);
   });
 
   it("uses rounded rectangle side labels before applying its pitch factor", () => {
@@ -123,6 +151,12 @@ describe("project totals", () => {
         planAreaSqFt: 0,
         source: "auto",
       },
+    ];
+    project.segments = [
+      { id: "s1", type: "rake", startPointId: "a", endPointId: "b", lengthFeet: 1, groupId: "g1", createdAt: "", updatedAt: "" },
+      { id: "s2", type: "eave", startPointId: "b", endPointId: "c", lengthFeet: 1, groupId: "g1", createdAt: "", updatedAt: "" },
+      { id: "s3", type: "rake", startPointId: "c", endPointId: "d", lengthFeet: 1, groupId: "g1", createdAt: "", updatedAt: "" },
+      { id: "s4", type: "ridge", startPointId: "d", endPointId: "a", lengthFeet: 1, groupId: "g1", createdAt: "", updatedAt: "" },
     ];
 
     const roundedEdgeLengths = project.points.map((point, index) =>
@@ -147,13 +181,14 @@ describe("project totals", () => {
     );
   });
 
-  it("uses a connected roof plane pitch before the project fallback pitch", () => {
+  it("uses a connected plane pitch after the boundary has enough type information", () => {
     const project = createEmptyProject("Plane pitch");
     project.singlePitch = "4/12";
     project.points = [
       { id: "a", lat: 39, lng: -105 },
       { id: "b", lat: 39, lng: -104.9998 },
       { id: "c", lat: 39.0002, lng: -105 },
+      { id: "d", lat: 39.0002, lng: -104.9998 },
     ];
     project.segments = [
       {
@@ -166,22 +201,24 @@ describe("project totals", () => {
         createdAt: "",
         updatedAt: "",
       },
+      { id: "eave", type: "eave", startPointId: "b", endPointId: "d", lengthFeet: 10, groupId: "g1", createdAt: "", updatedAt: "" },
+      { id: "second-rake", type: "rake", startPointId: "d", endPointId: "c", lengthFeet: 10, groupId: "g1", createdAt: "", updatedAt: "" },
+      { id: "ridge", type: "ridge", startPointId: "c", endPointId: "a", lengthFeet: 10, groupId: "g1", createdAt: "", updatedAt: "" },
     ];
     project.planes = [
       {
         id: "p1",
         name: "Roof Plane 1",
-        pointIds: ["a", "b", "c"],
+        pointIds: ["a", "b", "d", "c"],
         pitch: "8/12",
         planAreaSqFt: 0,
         source: "auto",
       },
     ];
 
-    expect(calculateProjectTotals(project).slopeAdjustedTotals.rake).toBeCloseTo(
-      12.02,
-      2,
-    );
+    expect(
+      getProjectCalculationBreakdown(project).segments.find((segment) => segment.id === "rake")?.slopeAdjustedLengthFeet,
+    ).toBeCloseTo(12.02, 2);
   });
 
   it("exposes the exact operands used for pitch-adjusted totals", () => {
@@ -203,11 +240,17 @@ describe("project totals", () => {
       {
         id: "p1",
         name: "Roof Plane 1",
-        pointIds: [],
+        pointIds: ["a", "b", "c", "d"],
         pitch: "6/12",
         planAreaSqFt: 100,
         source: "manual",
       },
+    ];
+    project.segments = [
+      { id: "s1", type: "rake", startPointId: "a", endPointId: "b", lengthFeet: 10, groupId: "g1", createdAt: "", updatedAt: "" },
+      { id: "s2", type: "eave", startPointId: "b", endPointId: "c", lengthFeet: 10, groupId: "g1", createdAt: "", updatedAt: "" },
+      { id: "s3", type: "rake", startPointId: "c", endPointId: "d", lengthFeet: 10, groupId: "g1", createdAt: "", updatedAt: "" },
+      { id: "s4", type: "ridge", startPointId: "d", endPointId: "a", lengthFeet: 10, groupId: "g1", createdAt: "", updatedAt: "" },
     ];
 
     const breakdown = getProjectCalculationBreakdown(project);

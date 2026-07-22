@@ -39,6 +39,7 @@ import {
 } from "@/lib/measurement/snapping"
 import { createTieInSegment } from "@/lib/measurement/tie-in"
 import { appendPersistenceDebugNote } from "@/lib/debug/persistence-debug"
+import { appendCalculationDebugNote } from "@/lib/debug/calculation-debug"
 import { db } from "@/lib/persistence/db"
 import { createEmptyProject } from "@/lib/projects/project-factory"
 import { FirstRunOnboarding } from "@/components/app/FirstRunOnboarding"
@@ -85,6 +86,7 @@ function createLiveCalculationProject(
     measurementSegments,
     pendingLineStart,
   )
+  project.measurementGeometry = geometry.measurementGeometry
   project.points = geometry.points
   project.segments = geometry.segments
   project.planes = roofPlanes
@@ -1436,22 +1438,51 @@ function MapKitTestPage() {
     )
     const breakdown = getProjectCalculationBreakdown(project)
     const totals = calculateProjectTotals(project)
-    const planeMath = breakdown.planes
-      .map(
-        (plane) =>
-          `${plane.id.slice(-8)}: ${formatCalculationDebugNumber(plane.planAreaSqFt)} sq ft × ${formatCalculationDebugNumber(plane.slopeFactor)} (${plane.pitch}) = ${formatCalculationDebugNumber(plane.slopeAreaSqFt)} sq ft`,
-      )
-      .join(" | ") || "none"
-    const lineMath = breakdown.segments
-      .filter((segment) => segment.pitch !== null)
-      .map(
-        (segment) =>
-          `${segment.type} ${segment.id.slice(-8)}: ${formatCalculationDebugNumber(segment.measuredLengthFeet)} ft × ${formatCalculationDebugNumber(segment.slopeFactor)} (${segment.pitch}) = ${formatCalculationDebugNumber(segment.slopeAdjustedLengthFeet)} ft`,
-      )
-      .join(" | ") || "none"
+    const planesById = new Map(nextPlanes.map((plane) => [plane.id, plane]))
+    const planeInputs = breakdown.planes
+      .map((plane) => {
+        const sourcePlane = planesById.get(plane.id)
+        const pitchSource = sourcePlane?.pitch
+          ? "plane override"
+          : `project default ${activeSinglePitch}`
+        const individualSides = plane.boundarySegments
+          .map(
+            (segment, index) =>
+              `${index + 1}. ${segment.type ?? "nil"} ${formatCalculationDebugNumber(segment.measuredLengthFeet)} ft`,
+          )
+          .join(" • ") || "none"
+        const lengthsByType = ["ridge", "eave", "rake", "valley", "hip", "nil"]
+          .map((type) => {
+            const lengths = plane.boundarySegments
+              .filter((segment) => (segment.type ?? "nil") === type)
+              .map((segment) => `${formatCalculationDebugNumber(segment.measuredLengthFeet)} ft`)
+              .join(", ") || "none"
+            return `  ${type} lengths: ${lengths}`
+          })
+          .join("\n")
+        return [
+          `Plane ${sourcePlane?.name ?? plane.id.slice(-8)} (${plane.id.slice(-8)})`,
+          `  vertices: ${sourcePlane?.pointIds.length ?? 0}`,
+          `  pitch used: ${plane.pitch} (${pitchSource})`,
+          `  pitch adjustment: ${plane.pitchApplied ? "applied" : "not applied — all boundary sides must be typed and at least two must be rake, hip, or valley"}`,
+          `  individual side lengths: ${individualSides}`,
+          lengthsByType,
+          `  plan area used: ${formatCalculationDebugNumber(plane.planAreaSqFt)} sq ft`,
+          `  slope factor used: ${formatCalculationDebugNumber(plane.slopeFactor)}`,
+          `  slope area result: ${formatCalculationDebugNumber(plane.slopeAreaSqFt)} sq ft`,
+        ].join("\n")
+      })
+      .join("\n\n") || "No roof planes are currently included in the calculation."
 
-    appendPersistenceDebugNote(
-      `PITCH RECALCULATED • plane ${change.planeId.slice(-8)} ${change.previousPitch} → ${change.nextPitch} • plane math: ${planeMath} • slope-line math: ${lineMath} • totals: plan ${formatCalculationDebugNumber(totals.totalPlanAreaSqFt)} sq ft, slope ${formatCalculationDebugNumber(totals.totalSlopeAreaSqFt)} sq ft, ${formatCalculationDebugNumber(totals.totalSquares)} squares, measured line ${formatCalculationDebugNumber(totals.totalMeasuredLength)} ft, slope-adjusted line ${formatCalculationDebugNumber(totals.totalSlopeAdjustedLength)} ft`,
+    appendCalculationDebugNote(
+      [
+        `PITCH CHANGE • project ${query || "Untitled"} (${currentProjectId?.slice(-8) ?? "unsaved"})`,
+        `changed plane ${change.planeId.slice(-8)}: ${change.previousPitch} → ${change.nextPitch}`,
+        `project default pitch: ${activeSinglePitch}`,
+        `planes used by calculator (${breakdown.planes.length}):`,
+        planeInputs,
+        `totals: plan ${formatCalculationDebugNumber(totals.totalPlanAreaSqFt)} sq ft • slope ${formatCalculationDebugNumber(totals.totalSlopeAreaSqFt)} sq ft • ${formatCalculationDebugNumber(totals.totalSquares)} squares`,
+      ].join("\n"),
     )
   }
 
