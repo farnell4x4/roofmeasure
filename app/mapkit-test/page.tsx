@@ -33,6 +33,10 @@ import {
   measurementPointKey,
   toProjectMeasurementData,
 } from "@/lib/measurement/project-geometry"
+import {
+  snapPointToMeasurementLine,
+  splitMeasurementSegmentsAtKnownPoints,
+} from "@/lib/measurement/snapping"
 import { createTieInSegment } from "@/lib/measurement/tie-in"
 import { appendPersistenceDebugNote } from "@/lib/debug/persistence-debug"
 import { db } from "@/lib/persistence/db"
@@ -114,6 +118,16 @@ function polygonLabelCenter(points: Array<{ x: number; y: number }>) {
 type MeasurementGeometryState = {
   segments: MeasurementSegment[]
   pendingLineStart: MeasurementPoint | null
+}
+
+function normalizeMeasurementGeometry(next: MeasurementGeometryState) {
+  return {
+    segments: splitMeasurementSegmentsAtKnownPoints(next.segments, [
+      ...next.segments.flatMap((segment) => [segment.start, segment.end]),
+      ...(next.pendingLineStart ? [next.pendingLineStart] : []),
+    ]),
+    pendingLineStart: next.pendingLineStart,
+  }
 }
 
 type SavedProjectMapRouteDebug = {
@@ -640,13 +654,14 @@ function MapKitTestPage() {
   }
 
   function replaceMeasurementGeometry(next: MeasurementGeometryState) {
-    measurementGeometryRef.current = next
-    setMeasurementSegments(next.segments)
-    setPendingLineStart(next.pendingLineStart)
+    const normalized = normalizeMeasurementGeometry(next)
+    measurementGeometryRef.current = normalized
+    setMeasurementSegments(normalized.segments)
+    setPendingLineStart(normalized.pendingLineStart)
 
     const geometry = toProjectMeasurementData(
-      next.segments,
-      next.pendingLineStart,
+      normalized.segments,
+      normalized.pendingLineStart,
     )
     const nextPlanes = detectRoofPlanes(
       geometry.points,
@@ -658,15 +673,16 @@ function MapKitTestPage() {
   }
 
   function persistMeasurementGeometry(next: MeasurementGeometryState) {
+    const normalized = normalizeMeasurementGeometry(next)
     const targetProjectId =
       currentProjectIdRef.current ?? pendingProjectRef.current?.id ?? null
     const hasMeasurementGeometry =
-      next.segments.length > 0 || next.pendingLineStart !== null
+      normalized.segments.length > 0 || normalized.pendingLineStart !== null
     if (!targetProjectId && !hasMeasurementGeometry) return
 
     const signature = measurementGeometrySignature(
-      next.segments,
-      next.pendingLineStart,
+      normalized.segments,
+      normalized.pendingLineStart,
     )
     if (
       lastPersistedGeometryRef.current?.projectId === targetProjectId &&
@@ -677,8 +693,8 @@ function MapKitTestPage() {
 
     const projectEpoch = projectEpochRef.current
     void saveProjectSnapshot({
-      measurementSegments: next.segments,
-      pendingLineStart: next.pendingLineStart,
+      measurementSegments: normalized.segments,
+      pendingLineStart: normalized.pendingLineStart,
       targetProjectId,
       projectEpoch,
       debugReason: "measurement",
@@ -1127,12 +1143,16 @@ function MapKitTestPage() {
   }
 
   function handleTappedCoordinate(
-    tappedPoint: MeasurementPoint,
+    tappedCoordinate: MeasurementPoint,
     anchor: DecisionAnchor | null,
   ) {
     setPointActionMenu(null)
     setPlanePitchMenu(null)
     const current = measurementGeometryRef.current
+    const tappedPoint = snapPointToMeasurementLine(
+      tappedCoordinate,
+      current.segments,
+    )
 
     if (!current.pendingLineStart) {
       const next = { ...current, pendingLineStart: tappedPoint }
