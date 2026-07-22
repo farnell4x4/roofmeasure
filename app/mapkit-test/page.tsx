@@ -39,6 +39,7 @@ import {
   EditableMeasurementSegment as MeasurementSegment,
   MapCameraState,
   PropertyLocation,
+  Project,
 } from "@/types/models"
 
 type LocationPermission = PermissionState | "unsupported"
@@ -67,6 +68,11 @@ type ProjectedMeasurementOverlay = {
     label: string
   }>
   points: ProjectedMeasurementPoint[]
+}
+
+type MeasurementGeometryState = {
+  segments: MeasurementSegment[]
+  pendingLineStart: MeasurementPoint | null
 }
 
 const EMPTY_PROJECTED_MEASUREMENT_OVERLAY: ProjectedMeasurementOverlay = {
@@ -153,6 +159,11 @@ export default function MapKitTestPage() {
   const projectEpochRef = useRef(0)
   const isProjectHydratingRef = useRef(false)
   const saveQueueRef = useRef(Promise.resolve<void>(undefined))
+  const pendingProjectRef = useRef<Project | null>(null)
+  const measurementGeometryRef = useRef<MeasurementGeometryState>({
+    segments: [],
+    pendingLineStart: null,
+  })
   const cameraSaveTimerRef = useRef<number | null>(null)
   const mapCameraRef = useRef<MapCameraState | null>(null)
   const pendingMapCameraRestoreRef = useRef<MapCameraState | null>(null)
@@ -235,7 +246,6 @@ export default function MapKitTestPage() {
   const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] =
     useState(false)
   const [precisionZoom, setPrecisionZoom] = useState(DEFAULT_PRECISION_ZOOM)
-  const [geometryCommitRevision, setGeometryCommitRevision] = useState(0)
   const [projectionRevision, setProjectionRevision] = useState(0)
   const [projectedMeasurementOverlay, setProjectedMeasurementOverlay] =
     useState<ProjectedMeasurementOverlay>(EMPTY_PROJECTED_MEASUREMENT_OVERLAY)
@@ -287,6 +297,7 @@ export default function MapKitTestPage() {
     async function hydrateProject() {
       if (!projectId) {
         currentProjectIdRef.current = null
+        pendingProjectRef.current = null
         mapCameraRef.current = null
         pendingMapCameraRestoreRef.current = null
         lastPersistedGeometryRef.current = null
@@ -295,8 +306,7 @@ export default function MapKitTestPage() {
         setQuery("")
         setSelectedPlace(null)
         setHasPersistedMapCamera(false)
-        setMeasurementSegments([])
-        setPendingLineStart(null)
+        replaceMeasurementGeometry({ segments: [], pendingLineStart: null })
         setPendingModeDecisionPoint(null)
         setPendingModeDecisionAnchor(null)
         setPointActionMenu(null)
@@ -321,6 +331,7 @@ export default function MapKitTestPage() {
         : null
 
       currentProjectIdRef.current = project.id
+      pendingProjectRef.current = null
       mapCameraRef.current = savedMapCamera
       pendingMapCameraRestoreRef.current = savedMapCamera
       lastPersistedGeometryRef.current = {
@@ -338,8 +349,10 @@ export default function MapKitTestPage() {
       setQuery(project.location?.formattedAddress ?? project.name)
       setSuppressSuggestionsUntilTyping(Boolean(project.location))
       setHasPersistedMapCamera(Boolean(savedMapCamera))
-      setMeasurementSegments(measurementState.segments)
-      setPendingLineStart(measurementState.pendingLineStart)
+      replaceMeasurementGeometry({
+        segments: measurementState.segments,
+        pendingLineStart: measurementState.pendingLineStart,
+      })
       setPendingModeDecisionPoint(null)
       setPendingModeDecisionAnchor(null)
       setPointActionMenu(null)
@@ -377,9 +390,43 @@ export default function MapKitTestPage() {
     }
   }
 
+  function replaceMeasurementGeometry(next: MeasurementGeometryState) {
+    measurementGeometryRef.current = next
+    setMeasurementSegments(next.segments)
+    setPendingLineStart(next.pendingLineStart)
+  }
+
+  function persistMeasurementGeometry(next: MeasurementGeometryState) {
+    const targetProjectId =
+      currentProjectIdRef.current ?? pendingProjectRef.current?.id ?? null
+    const hasMeasurementGeometry =
+      next.segments.length > 0 || next.pendingLineStart !== null
+    if (!targetProjectId && !hasMeasurementGeometry) return
+
+    const signature = measurementGeometrySignature(
+      next.segments,
+      next.pendingLineStart,
+    )
+    if (
+      lastPersistedGeometryRef.current?.projectId === targetProjectId &&
+      lastPersistedGeometryRef.current.signature === signature
+    ) {
+      return
+    }
+
+    const projectEpoch = projectEpochRef.current
+    void saveProjectSnapshot({
+      measurementSegments: next.segments,
+      pendingLineStart: next.pendingLineStart,
+      targetProjectId,
+      projectEpoch,
+    }).catch((error) => {
+      console.error("Measurement project save failed.", error)
+    })
+  }
+
   function resetMeasurementSession() {
-    setMeasurementSegments([])
-    setPendingLineStart(null)
+    replaceMeasurementGeometry({ segments: [], pendingLineStart: null })
     setPendingModeDecisionPoint(null)
     setPendingModeDecisionAnchor(null)
     setPointActionMenu(null)
@@ -457,20 +504,6 @@ export default function MapKitTestPage() {
     setPrecisionZoom((current) =>
       zoomAroundViewportCenter(current, nextScale, viewport),
     )
-  }
-
-  function appendMeasurementSegment(
-    start: MeasurementPoint,
-    end: MeasurementPoint,
-  ) {
-    setMeasurementSegments((currentSegments) => [
-      ...currentSegments,
-      {
-        id: `${Date.now()}-${currentSegments.length}`,
-        start,
-        end,
-      },
-    ])
   }
 
   function readMapCamera(): MapCameraState | null {
@@ -562,10 +595,21 @@ export default function MapKitTestPage() {
     const snapshotQuery = query.trim()
     const snapshotLocation = options?.location
     const snapshotProjectName = options?.projectName
-    const targetProjectId =
+    const requestedProjectId =
       options && "targetProjectId" in options
         ? (options.targetProjectId ?? null)
         : currentProjectIdRef.current
+    const fallbackProjectName =
+      (snapshotProjectName ?? snapshotQuery) ||
+      snapshotLocation?.formattedAddress ||
+      "Untitled Project"
+    const pendingProject = requestedProjectId
+      ? pendingProjectRef.current?.id === requestedProjectId
+        ? pendingProjectRef.current
+        : null
+      : (pendingProjectRef.current ??
+        (pendingProjectRef.current = createEmptyProject(fallbackProjectName)))
+    const targetProjectId = requestedProjectId ?? pendingProject?.id ?? null
     const projectEpoch = options?.projectEpoch ?? projectEpochRef.current
     const hasExplicitMapCamera = Boolean(options && "mapCamera" in options)
     const snapshotMapCamera = hasExplicitMapCamera
@@ -587,16 +631,15 @@ export default function MapKitTestPage() {
         : undefined
       if (
         projectEpoch !== projectEpochRef.current ||
-        (targetProjectId && !existingProject)
+        (targetProjectId && !existingProject && !pendingProject)
       )
         return null
       const projectName =
         snapshotProjectName ??
         existingProject?.name ??
-        (snapshotQuery ||
-          snapshotLocation?.formattedAddress ||
-          "Untitled Project")
-      const baseProject = existingProject ?? createEmptyProject(projectName)
+        pendingProject?.name ??
+        fallbackProjectName
+      const baseProject = existingProject ?? pendingProject ?? createEmptyProject(projectName)
       const savedProject = await db.saveProject({
         ...baseProject,
         name: projectName,
@@ -625,6 +668,9 @@ export default function MapKitTestPage() {
         projectId: savedProject.id,
         signature: mapCameraSignature(savedProject.mapCamera ?? null),
       }
+      if (pendingProjectRef.current?.id === savedProject.id) {
+        pendingProjectRef.current = null
+      }
 
       if (currentProjectIdRef.current !== savedProject.id) {
         currentProjectIdRef.current = savedProject.id
@@ -651,9 +697,9 @@ export default function MapKitTestPage() {
     nextPoint: MeasurementPoint,
   ) {
     const sourceKey = measurementPointKey(sourcePoint)
-
-    setMeasurementSegments((currentSegments) =>
-      currentSegments.map((segment) => ({
+    const current = measurementGeometryRef.current
+    const next: MeasurementGeometryState = {
+      segments: current.segments.map((segment) => ({
         ...segment,
         start:
           measurementPointKey(segment.start) === sourceKey
@@ -664,12 +710,13 @@ export default function MapKitTestPage() {
             ? nextPoint
             : segment.end,
       })),
-    )
-    setPendingLineStart((currentPoint) =>
-      currentPoint && measurementPointKey(currentPoint) === sourceKey
-        ? nextPoint
-        : currentPoint,
-    )
+      pendingLineStart:
+        current.pendingLineStart &&
+        measurementPointKey(current.pendingLineStart) === sourceKey
+          ? nextPoint
+          : current.pendingLineStart,
+    }
+    replaceMeasurementGeometry(next)
     setPendingModeDecisionPoint((currentPoint) =>
       currentPoint && measurementPointKey(currentPoint) === sourceKey
         ? nextPoint
@@ -694,9 +741,12 @@ export default function MapKitTestPage() {
     anchor: DecisionAnchor | null,
   ) {
     setPointActionMenu(null)
+    const current = measurementGeometryRef.current
 
-    if (!pendingLineStart) {
-      setPendingLineStart(tappedPoint)
+    if (!current.pendingLineStart) {
+      const next = { ...current, pendingLineStart: tappedPoint }
+      replaceMeasurementGeometry(next)
+      persistMeasurementGeometry(next)
       setPendingModeDecisionPoint(null)
       setPendingModeDecisionAnchor(null)
       return
@@ -742,13 +792,27 @@ export default function MapKitTestPage() {
 
     if (!decisionPoint) return
 
-    if (mode === "continue" && pendingLineStart) {
-      appendMeasurementSegment(pendingLineStart, decisionPoint)
-      setPendingLineStart(decisionPoint)
+    const current = measurementGeometryRef.current
+    if (mode === "continue" && current.pendingLineStart) {
+      const next: MeasurementGeometryState = {
+        segments: [
+          ...current.segments,
+          {
+            id: `${Date.now()}-${current.segments.length}`,
+            start: current.pendingLineStart,
+            end: decisionPoint,
+          },
+        ],
+        pendingLineStart: decisionPoint,
+      }
+      replaceMeasurementGeometry(next)
+      persistMeasurementGeometry(next)
       return
     }
 
-    setPendingLineStart(decisionPoint)
+    const next = { ...current, pendingLineStart: decisionPoint }
+    replaceMeasurementGeometry(next)
+    persistMeasurementGeometry(next)
   }
 
   function removeAnnotation(annotationRef: React.MutableRefObject<unknown>) {
@@ -808,24 +872,29 @@ export default function MapKitTestPage() {
   function handleTieInPoint(point: MeasurementPoint) {
     setPendingModeDecisionPoint(null)
     setPendingModeDecisionAnchor(null)
-    setPendingLineStart(point)
+    const next = { ...measurementGeometryRef.current, pendingLineStart: point }
+    replaceMeasurementGeometry(next)
+    persistMeasurementGeometry(next)
     setPointActionMenu(null)
   }
 
   function handleDeletePoint(point: MeasurementPoint) {
     const targetKey = measurementPointKey(point)
-    setMeasurementSegments((currentSegments) =>
-      currentSegments.filter(
+    const current = measurementGeometryRef.current
+    const next: MeasurementGeometryState = {
+      segments: current.segments.filter(
         (segment) =>
           measurementPointKey(segment.start) !== targetKey &&
           measurementPointKey(segment.end) !== targetKey,
       ),
-    )
-    setPendingLineStart((currentPoint) =>
-      currentPoint && measurementPointKey(currentPoint) === targetKey
-        ? null
-        : currentPoint,
-    )
+      pendingLineStart:
+        current.pendingLineStart &&
+        measurementPointKey(current.pendingLineStart) === targetKey
+          ? null
+          : current.pendingLineStart,
+    }
+    replaceMeasurementGeometry(next)
+    persistMeasurementGeometry(next)
     setPendingModeDecisionPoint((currentPoint) =>
       currentPoint && measurementPointKey(currentPoint) === targetKey
         ? null
@@ -966,7 +1035,7 @@ export default function MapKitTestPage() {
 
     removeAnnotation(selectedPlaceAnnotationRef)
 
-    if (!place) return
+    if (!place || superZoomActive) return
 
     const annotation = new mapkit.MarkerAnnotation(
       new mapkit.Coordinate(place.latitude, place.longitude),
@@ -1407,7 +1476,7 @@ export default function MapKitTestPage() {
   useEffect(() => {
     if (!mapReady) return
     syncSelectedPlaceAnnotation(selectedPlace)
-  }, [currentLocation, mapReady, selectedPlace])
+  }, [currentLocation, mapReady, selectedPlace, superZoomActive])
 
   useEffect(() => {
     if (!mapReady || !selectedPlace) return
@@ -1462,38 +1531,6 @@ export default function MapKitTestPage() {
     if (!mapReady) return
     syncMeasurementVisuals()
   }, [mapReady, measurementSegments, pendingLineStart, superZoomActive])
-
-  useEffect(() => {
-    if (
-      !currentProjectId ||
-      !projectHydrated ||
-      isProjectHydratingRef.current ||
-      measurementPointDragRef.current
-    )
-      return
-    const signature = measurementGeometrySignature(
-      measurementSegments,
-      pendingLineStart,
-    )
-    if (
-      lastPersistedGeometryRef.current?.projectId === currentProjectId &&
-      lastPersistedGeometryRef.current.signature === signature
-    ) {
-      return
-    }
-
-    const projectEpoch = projectEpochRef.current
-    void saveProjectSnapshot({
-      targetProjectId: currentProjectId,
-      projectEpoch,
-    }).catch(() => undefined)
-  }, [
-    currentProjectId,
-    geometryCommitRevision,
-    measurementSegments,
-    pendingLineStart,
-    projectHydrated,
-  ])
 
   async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -1799,7 +1836,7 @@ export default function MapKitTestPage() {
     event.preventDefault()
     event.currentTarget.releasePointerCapture(event.pointerId)
     measurementPointDragRef.current = null
-    setGeometryCommitRevision((current) => current + 1)
+    persistMeasurementGeometry(measurementGeometryRef.current)
   }
 
   function handleMeasurementPointPointerCancel(
@@ -1810,7 +1847,7 @@ export default function MapKitTestPage() {
       event.preventDefault()
       event.currentTarget.releasePointerCapture(event.pointerId)
       measurementPointDragRef.current = null
-      setGeometryCommitRevision((current) => current + 1)
+      persistMeasurementGeometry(measurementGeometryRef.current)
     }
   }
 
