@@ -407,6 +407,14 @@ export default function MapKitTestPage() {
     return y * superZoomScale + superZoomOffsetY;
   }
 
+  function normalizeViewportXToBaseLayer(x: number) {
+    return (x - superZoomOffsetX) / superZoomScale;
+  }
+
+  function normalizeViewportYToBaseLayer(y: number) {
+    return (y - superZoomOffsetY) / superZoomScale;
+  }
+
   function handleTappedCoordinate(tappedPoint: MeasurementPoint, anchor: DecisionAnchor | null) {
     setPointActionMenu(null);
 
@@ -521,6 +529,20 @@ export default function MapKitTestPage() {
     setPointActionMenu(null);
   }
 
+  const overlayVisualScale = 1 / superZoomScale;
+  const pointButtonSize = 28 * overlayVisualScale;
+  const pointDotSize = 10 * overlayVisualScale;
+  const pointDotBorderWidth = 2 * overlayVisualScale;
+  const segmentStrokeWidth = 3 * overlayVisualScale;
+  const segmentDash = `${6 * overlayVisualScale} ${6 * overlayVisualScale}`;
+  const labelWidth = 48 * overlayVisualScale;
+  const labelHeight = 20 * overlayVisualScale;
+  const labelRadius = 10 * overlayVisualScale;
+  const labelOffsetX = 24 * overlayVisualScale;
+  const labelOffsetY = 10 * overlayVisualScale;
+  const labelFontSize = 10 * overlayVisualScale;
+  const pointShadow = `0 ${6 * overlayVisualScale}px ${18 * overlayVisualScale}px rgba(20, 24, 22, 0.22)`;
+
   function buildProjectedMeasurementOverlay(): ProjectedMeasurementOverlay {
     if (typeof window === "undefined") {
       return EMPTY_PROJECTED_MEASUREMENT_OVERLAY;
@@ -542,10 +564,10 @@ export default function MapKitTestPage() {
       const endPagePoint = map.convertCoordinateToPointOnPage(
         new coordinateCtor(segment.end.latitude, segment.end.longitude)
       );
-      const startX = startPagePoint.x - bounds.left;
-      const startY = startPagePoint.y - bounds.top;
-      const endX = endPagePoint.x - bounds.left;
-      const endY = endPagePoint.y - bounds.top;
+      const startX = normalizeViewportXToBaseLayer(startPagePoint.x - bounds.left);
+      const startY = normalizeViewportYToBaseLayer(startPagePoint.y - bounds.top);
+      const endX = normalizeViewportXToBaseLayer(endPagePoint.x - bounds.left);
+      const endY = normalizeViewportYToBaseLayer(endPagePoint.y - bounds.top);
       const dx = endX - startX;
       const dy = endY - startY;
       const length = Math.hypot(dx, dy) || 1;
@@ -598,8 +620,8 @@ export default function MapKitTestPage() {
       points.set(measurementPointKey(pendingLineStart), {
         ...pendingLineStart,
         key: measurementPointKey(pendingLineStart),
-        x: pendingPagePoint.x - bounds.left,
-        y: pendingPagePoint.y - bounds.top,
+        x: normalizeViewportXToBaseLayer(pendingPagePoint.x - bounds.left),
+        y: normalizeViewportYToBaseLayer(pendingPagePoint.y - bounds.top),
         tone: "pending"
       });
     }
@@ -1228,11 +1250,10 @@ export default function MapKitTestPage() {
 
     if (drag.dragging) return;
 
-    const originalPoint = getSuperZoomOriginalPagePoint(event.clientX, event.clientY);
-    if (!originalPoint) return;
+    const pointOnPage = new DOMPoint(event.pageX, event.pageY);
     const bounds = mapViewportRef.current?.getBoundingClientRect();
     handlePointOnPage(
-      originalPoint,
+      pointOnPage,
       bounds
         ? {
             x: event.clientX - bounds.left,
@@ -1247,15 +1268,6 @@ export default function MapKitTestPage() {
       event.currentTarget.releasePointerCapture(event.pointerId);
       superZoomDragRef.current = null;
     }
-  }
-
-  function getSuperZoomOriginalPagePoint(clientX: number, clientY: number) {
-    const bounds = mapViewportRef.current?.getBoundingClientRect();
-    if (!bounds) return null;
-
-    const originalX = (clientX - bounds.left - superZoomOffsetX) / superZoomScale;
-    const originalY = (clientY - bounds.top - superZoomOffsetY) / superZoomScale;
-    return new DOMPoint(bounds.left + originalX, bounds.top + originalY);
   }
 
   function handleMeasurementPointPointerDown(event: ReactPointerEvent<HTMLButtonElement>, point: MeasurementPoint) {
@@ -1276,10 +1288,9 @@ export default function MapKitTestPage() {
     event.preventDefault();
 
     const map = mapInstanceRef.current;
-    const originalPoint = getSuperZoomOriginalPagePoint(event.clientX, event.clientY);
-    if (!map || !originalPoint) return;
+    if (!map) return;
 
-    const coordinate = map.convertPointOnPageToCoordinate(originalPoint);
+    const coordinate = map.convertPointOnPageToCoordinate(new DOMPoint(event.pageX, event.pageY));
     const nextPoint = {
       latitude: coordinate.latitude ?? drag.sourcePoint.latitude,
       longitude: coordinate.longitude ?? drag.sourcePoint.longitude
@@ -1779,25 +1790,25 @@ export default function MapKitTestPage() {
                       x2={segment.endX}
                       y2={segment.endY}
                       stroke="#e0b93b"
-                      strokeWidth={3}
+                      strokeWidth={segmentStrokeWidth}
                       strokeLinecap="round"
-                      strokeDasharray="6 6"
+                      strokeDasharray={segmentDash}
                     />
                     <g transform={`translate(${segment.labelX} ${segment.labelY})`}>
                       <rect
-                        x={-24}
-                        y={-10}
-                        width={48}
-                        height={20}
-                        rx={10}
+                        x={-labelOffsetX}
+                        y={-labelOffsetY}
+                        width={labelWidth}
+                        height={labelHeight}
+                        rx={labelRadius}
                         fill="rgba(31, 37, 34, 0.82)"
                       />
                       <text
                         x={0}
-                        y={3.5}
+                        y={3.5 * overlayVisualScale}
                         fill="#fff"
                         textAnchor="middle"
-                        fontSize="10pt"
+                        fontSize={labelFontSize}
                         fontWeight={700}
                       >
                         {segment.label}
@@ -1819,8 +1830,8 @@ export default function MapKitTestPage() {
                     position: "absolute",
                     left: point.x,
                     top: point.y,
-                    width: 28,
-                    height: 28,
+                    width: pointButtonSize,
+                    height: pointButtonSize,
                     transform: "translate(-50%, -50%)",
                     borderRadius: 999,
                     border: 0,
@@ -1835,14 +1846,16 @@ export default function MapKitTestPage() {
                   aria-label="Move measurement point"
                 >
                   <span
-                    style={{
+                  style={{
                       display: "block",
-                      width: 10,
-                      height: 10,
+                      width: pointDotSize,
+                      height: pointDotSize,
                       borderRadius: 999,
-                      border: point.tone === "pending" ? "2px solid #1f2522" : "2px solid rgba(255,255,255,0.95)",
+                      border: point.tone === "pending"
+                        ? `${pointDotBorderWidth}px solid #1f2522`
+                        : `${pointDotBorderWidth}px solid rgba(255,255,255,0.95)`,
                       background: point.tone === "pending" ? "#ffffff" : "#1f2522",
-                      boxShadow: "0 6px 18px rgba(20, 24, 22, 0.22)"
+                      boxShadow: pointShadow
                     }}
                   />
                 </button>
