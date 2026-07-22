@@ -1,76 +1,131 @@
-"use client";
+"use client"
 
-import { MapPin, Search } from "lucide-react";
-import { FormEvent, PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { MapPin, Search } from "lucide-react"
+import {
+  FormEvent,
+  PointerEvent as ReactPointerEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   loadMapKit,
   lookupStreetAddressWithBias,
   searchAddressSuggestions,
-  searchBestAddressMatch
-} from "@/lib/mapkit/client";
+  searchBestAddressMatch,
+} from "@/lib/mapkit/client"
+import {
+  baseViewportPointToVisualViewportPoint,
+  clampPrecisionZoomTransform,
+  DEFAULT_PRECISION_ZOOM,
+  mapPagePointToBaseViewportPoint,
+  PRECISION_ZOOM_LEVELS,
+  visualPagePointToMapPagePoint,
+  zoomAroundViewportCenter,
+} from "@/lib/mapkit/precision-zoom"
 import {
   fromProjectMeasurementData,
+  measurementGeometrySignature,
   measurementPointKey,
-  toProjectMeasurementData
-} from "@/lib/measurement/project-geometry";
-import { db } from "@/lib/persistence/db";
-import { createEmptyProject } from "@/lib/projects/project-factory";
-import { haversineDistanceFeet } from "@/lib/measurement/geometry";
-import { AddressSuggestion } from "@/types/mapkit";
-import { EditableMeasurementPoint as MeasurementPoint, EditableMeasurementSegment as MeasurementSegment, PropertyLocation } from "@/types/models";
+  toProjectMeasurementData,
+} from "@/lib/measurement/project-geometry"
+import { db } from "@/lib/persistence/db"
+import { createEmptyProject } from "@/lib/projects/project-factory"
+import { haversineDistanceFeet } from "@/lib/measurement/geometry"
+import { AddressSuggestion } from "@/types/mapkit"
+import {
+  EditableMeasurementPoint as MeasurementPoint,
+  EditableMeasurementSegment as MeasurementSegment,
+  MapCameraState,
+  PropertyLocation,
+} from "@/types/models"
 
-type LocationPermission = PermissionState | "unsupported";
-const LOCATION_ALERT_DISMISSED_KEY = "roofmeasure.mapkit-test.location-alert-dismissed";
-const SEARCH_MAX_ZOOM_SPAN = 0.00005;
-type DecisionAnchor = { x: number; y: number };
+type LocationPermission = PermissionState | "unsupported"
+const LOCATION_ALERT_DISMISSED_KEY =
+  "roofmeasure.mapkit-test.location-alert-dismissed"
+const SEARCH_MAX_ZOOM_SPAN = 0.00005
+const MAP_CAMERA_SAVE_DELAY_MS = 350
+type DecisionAnchor = { x: number; y: number }
 type PointActionMenuState = {
-  point: MeasurementPoint;
-  anchor: DecisionAnchor;
-};
+  point: MeasurementPoint
+  anchor: DecisionAnchor
+}
 type ProjectedMeasurementPoint = MeasurementPoint & {
-  key: string;
-  x: number;
-  y: number;
-  tone: "solid" | "pending";
-};
+  key: string
+  x: number
+  y: number
+  tone: "solid" | "pending"
+}
 type ProjectedMeasurementOverlay = {
   segments: Array<{
-    id: string;
-    startX: number;
-    startY: number;
-    endX: number;
-    endY: number;
-    labelX: number;
-    labelY: number;
-    label: string;
-  }>;
-  points: ProjectedMeasurementPoint[];
-};
+    id: string
+    startX: number
+    startY: number
+    endX: number
+    endY: number
+    label: string
+  }>
+  points: ProjectedMeasurementPoint[]
+}
 
 const EMPTY_PROJECTED_MEASUREMENT_OVERLAY: ProjectedMeasurementOverlay = {
   segments: [],
-  points: []
-};
+  points: [],
+}
 
-function toProjectLocation(address: Pick<AddressSuggestion, "title" | "subtitle" | "formattedAddress" | "latitude" | "longitude">): PropertyLocation {
+function isUsableMapCamera(
+  camera: MapCameraState | undefined,
+): camera is MapCameraState {
+  return Boolean(
+    camera &&
+    Number.isFinite(camera.centerLat) &&
+    Number.isFinite(camera.centerLng) &&
+    Number.isFinite(camera.latSpan) &&
+    Number.isFinite(camera.lngSpan) &&
+    camera.latSpan > 0 &&
+    camera.lngSpan > 0,
+  )
+}
+
+function mapCameraSignature(camera: MapCameraState | null) {
+  if (!camera || !isUsableMapCamera(camera)) return ""
+  return [camera.centerLat, camera.centerLng, camera.latSpan, camera.lngSpan]
+    .map((value) => value.toPrecision(14))
+    .join(":")
+}
+
+function toProjectLocation(
+  address: Pick<
+    AddressSuggestion,
+    "title" | "subtitle" | "formattedAddress" | "latitude" | "longitude"
+  >,
+): PropertyLocation {
   return {
-    formattedAddress: address.formattedAddress || [address.title, address.subtitle].filter(Boolean).join(", "),
+    formattedAddress:
+      address.formattedAddress ||
+      [address.title, address.subtitle].filter(Boolean).join(", "),
     latitude: address.latitude ?? 0,
-    longitude: address.longitude ?? 0
-  };
+    longitude: address.longitude ?? 0,
+  }
 }
 
 async function getLocationPermission(): Promise<LocationPermission> {
-  if (typeof navigator === "undefined" || !navigator.permissions || typeof navigator.permissions.query !== "function") {
-    return "unsupported";
+  if (
+    typeof navigator === "undefined" ||
+    !navigator.permissions ||
+    typeof navigator.permissions.query !== "function"
+  ) {
+    return "unsupported"
   }
 
   try {
-    const status = await navigator.permissions.query({ name: "geolocation" as PermissionName });
-    return status.state;
+    const status = await navigator.permissions.query({
+      name: "geolocation" as PermissionName,
+    })
+    return status.state
   } catch {
-    return "unsupported";
+    return "unsupported"
   }
 }
 
@@ -79,502 +134,738 @@ async function requestCurrentLocation() {
     navigator.geolocation.getCurrentPosition(resolve, reject, {
       enableHighAccuracy: true,
       timeout: 10_000,
-      maximumAge: 30_000
-    });
-  });
+      maximumAge: 30_000,
+    })
+  })
 }
 
 export default function MapKitTestPage() {
-  const pathname = usePathname();
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const projectId = searchParams.get("projectId");
-  const mapViewportRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<HTMLDivElement | null>(null);
-  const mapInstanceRef = useRef<InstanceType<NonNullable<NonNullable<Window["mapkit"]>["Map"]>> | null>(null);
-  const currentProjectIdRef = useRef<string | null>(null);
-  const saveQueueRef = useRef(Promise.resolve<void>(undefined));
-  const projectionRefreshFrameRef = useRef<number | null>(null);
+  const pathname = usePathname()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const projectId = searchParams.get("projectId")
+  const mapViewportRef = useRef<HTMLDivElement | null>(null)
+  const mapRef = useRef<HTMLDivElement | null>(null)
+  const mapInstanceRef = useRef<InstanceType<
+    NonNullable<NonNullable<Window["mapkit"]>["Map"]>
+  > | null>(null)
+  const currentProjectIdRef = useRef<string | null>(null)
+  const projectEpochRef = useRef(0)
+  const isProjectHydratingRef = useRef(false)
+  const saveQueueRef = useRef(Promise.resolve<void>(undefined))
+  const cameraSaveTimerRef = useRef<number | null>(null)
+  const mapCameraRef = useRef<MapCameraState | null>(null)
+  const pendingMapCameraRestoreRef = useRef<MapCameraState | null>(null)
+  const lastPersistedGeometryRef = useRef<{
+    projectId: string
+    signature: string
+  } | null>(null)
+  const lastPersistedMapCameraRef = useRef<{
+    projectId: string
+    signature: string
+  } | null>(null)
+  const projectionRefreshFrameRef = useRef<number | null>(null)
   const superZoomDragRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    originX: number;
-    originY: number;
-    dragging: boolean;
-  } | null>(null);
+    pointerId: number
+    startX: number
+    startY: number
+    originX: number
+    originY: number
+    dragging: boolean
+  } | null>(null)
   const measurementPointDragRef = useRef<{
-    pointerId: number;
-    sourcePoint: MeasurementPoint;
-  } | null>(null);
-  const hasCenteredOnUserLocationRef = useRef(false);
-  const selectedPlaceAnnotationRef = useRef<unknown>(null);
-  const currentLocationAnnotationRef = useRef<unknown>(null);
-  const measurementPointAnnotationRefs = useRef<unknown[]>([]);
-  const measurementLineOverlayRefs = useRef<unknown[]>([]);
-  const measurementLabelAnnotationRefs = useRef<unknown[]>([]);
+    pointerId: number
+    sourcePoint: MeasurementPoint
+  } | null>(null)
+  const hasCenteredOnUserLocationRef = useRef(false)
+  const selectedPlaceAnnotationRef = useRef<unknown>(null)
+  const currentLocationAnnotationRef = useRef<unknown>(null)
+  const measurementPointAnnotationRefs = useRef<unknown[]>([])
+  const measurementLineOverlayRefs = useRef<unknown[]>([])
+  const measurementLabelAnnotationRefs = useRef<unknown[]>([])
   const locationBiasRef = useRef<{
-    centerLat: number;
-    centerLng: number;
-    latSpan: number;
-    lngSpan: number;
-    countryCode?: string;
-  } | null>(null);
-  const [mapReady, setMapReady] = useState(false);
-  const [query, setQuery] = useState("");
-  const [suppressSuggestionsUntilTyping, setSuppressSuggestionsUntilTyping] = useState(false);
-  const [searchState, setSearchState] = useState<"idle" | "loading" | "error">("idle");
-  const [searchMessage, setSearchMessage] = useState("");
-  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
-  const [autocompleteState, setAutocompleteState] = useState<"idle" | "loading" | "success" | "error">("idle");
-  const [autocompleteMessage, setAutocompleteMessage] = useState("");
+    centerLat: number
+    centerLng: number
+    latSpan: number
+    lngSpan: number
+    countryCode?: string
+  } | null>(null)
+  const [mapReady, setMapReady] = useState(false)
+  const [query, setQuery] = useState("")
+  const [suppressSuggestionsUntilTyping, setSuppressSuggestionsUntilTyping] =
+    useState(false)
+  const [searchState, setSearchState] = useState<"idle" | "loading" | "error">(
+    "idle",
+  )
+  const [searchMessage, setSearchMessage] = useState("")
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([])
+  const [autocompleteState, setAutocompleteState] = useState<
+    "idle" | "loading" | "success" | "error"
+  >("idle")
+  const [autocompleteMessage, setAutocompleteMessage] = useState("")
   const [locationBias, setLocationBias] = useState<{
-    centerLat: number;
-    centerLng: number;
-    latSpan: number;
-    lngSpan: number;
-    countryCode?: string;
-  } | null>(null);
-  const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [selectedPlace, setSelectedPlace] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  const [projectHydrated, setProjectHydrated] = useState(false);
-  const [measurementSegments, setMeasurementSegments] = useState<MeasurementSegment[]>([]);
-  const [pendingLineStart, setPendingLineStart] = useState<MeasurementPoint | null>(null);
-  const [pendingModeDecisionPoint, setPendingModeDecisionPoint] = useState<MeasurementPoint | null>(null);
-  const [pendingModeDecisionAnchor, setPendingModeDecisionAnchor] = useState<DecisionAnchor | null>(null);
-  const [pointActionMenu, setPointActionMenu] = useState<PointActionMenuState | null>(null);
-  const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] = useState(false);
-  const [superZoomScale, setSuperZoomScale] = useState(1);
-  const [superZoomOffsetX, setSuperZoomOffsetX] = useState(0);
-  const [superZoomOffsetY, setSuperZoomOffsetY] = useState(0);
-  const [projectionRevision, setProjectionRevision] = useState(0);
-  const [projectedMeasurementOverlay, setProjectedMeasurementOverlay] = useState<ProjectedMeasurementOverlay>(
-    EMPTY_PROJECTED_MEASUREMENT_OVERLAY
-  );
+    centerLat: number
+    centerLng: number
+    latSpan: number
+    lngSpan: number
+    countryCode?: string
+  } | null>(null)
+  const [currentLocation, setCurrentLocation] = useState<{
+    latitude: number
+    longitude: number
+  } | null>(null)
+  const [selectedPlace, setSelectedPlace] = useState<{
+    latitude: number
+    longitude: number
+  } | null>(null)
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null)
+  const [projectHydrated, setProjectHydrated] = useState(false)
+  const [hasPersistedMapCamera, setHasPersistedMapCamera] = useState(false)
+  const [measurementSegments, setMeasurementSegments] = useState<
+    MeasurementSegment[]
+  >([])
+  const [pendingLineStart, setPendingLineStart] =
+    useState<MeasurementPoint | null>(null)
+  const [pendingModeDecisionPoint, setPendingModeDecisionPoint] =
+    useState<MeasurementPoint | null>(null)
+  const [pendingModeDecisionAnchor, setPendingModeDecisionAnchor] =
+    useState<DecisionAnchor | null>(null)
+  const [pointActionMenu, setPointActionMenu] =
+    useState<PointActionMenuState | null>(null)
+  const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] =
+    useState(false)
+  const [precisionZoom, setPrecisionZoom] = useState(DEFAULT_PRECISION_ZOOM)
+  const [geometryCommitRevision, setGeometryCommitRevision] = useState(0)
+  const [projectionRevision, setProjectionRevision] = useState(0)
+  const [projectedMeasurementOverlay, setProjectedMeasurementOverlay] =
+    useState<ProjectedMeasurementOverlay>(EMPTY_PROJECTED_MEASUREMENT_OVERLAY)
   const [locationState, setLocationState] = useState<
-    "idle" | "requesting" | "granted" | "denied" | "unsupported" | "error" | "prompt"
-  >("idle");
-  const [locationAlert, setLocationAlert] = useState("");
-  const [isLocationAlertDismissed, setIsLocationAlertDismissed] = useState(false);
-  const superZoomActive = superZoomScale > 1;
+    | "idle"
+    | "requesting"
+    | "granted"
+    | "denied"
+    | "unsupported"
+    | "error"
+    | "prompt"
+  >("idle")
+  const [locationAlert, setLocationAlert] = useState("")
+  const [isLocationAlertDismissed, setIsLocationAlertDismissed] =
+    useState(false)
+  const superZoomScale = precisionZoom.scale
+  const superZoomOffsetX = precisionZoom.offsetX
+  const superZoomOffsetY = precisionZoom.offsetY
+  const superZoomActive = precisionZoom.scale > 1
 
   const safariLocationHelp =
-    'In Safari, open Website Settings for this page and change Location to "Allow", then reload this page.';
+    'In Safari, open Website Settings for this page and change Location to "Allow", then reload this page.'
 
   useEffect(() => {
-    locationBiasRef.current = locationBias;
-  }, [locationBias]);
+    locationBiasRef.current = locationBias
+  }, [locationBias])
 
   useEffect(() => {
-    currentProjectIdRef.current = currentProjectId;
-  }, [currentProjectId]);
+    currentProjectIdRef.current = currentProjectId
+  }, [currentProjectId])
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    setIsLocationAlertDismissed(window.localStorage.getItem(LOCATION_ALERT_DISMISSED_KEY) === "1");
-  }, []);
+    if (typeof window === "undefined") return
+    setIsLocationAlertDismissed(
+      window.localStorage.getItem(LOCATION_ALERT_DISMISSED_KEY) === "1",
+    )
+  }, [])
 
   useEffect(() => {
-    let cancelled = false;
+    let cancelled = false
+    const hydrationEpoch = projectEpochRef.current + 1
+    projectEpochRef.current = hydrationEpoch
+    isProjectHydratingRef.current = true
+    if (cameraSaveTimerRef.current !== null) {
+      window.clearTimeout(cameraSaveTimerRef.current)
+      cameraSaveTimerRef.current = null
+    }
 
     async function hydrateProject() {
       if (!projectId) {
-        currentProjectIdRef.current = null;
-        setCurrentProjectId(null);
-        setQuery("");
-        setSelectedPlace(null);
-        setMeasurementSegments([]);
-        setPendingLineStart(null);
-        setPendingModeDecisionPoint(null);
-        setPendingModeDecisionAnchor(null);
-        setPointActionMenu(null);
-        setSuppressSuggestionsUntilTyping(false);
-        resetSuperZoom();
-        setProjectHydrated(true);
-        return;
+        currentProjectIdRef.current = null
+        mapCameraRef.current = null
+        pendingMapCameraRestoreRef.current = null
+        lastPersistedGeometryRef.current = null
+        lastPersistedMapCameraRef.current = null
+        setCurrentProjectId(null)
+        setQuery("")
+        setSelectedPlace(null)
+        setHasPersistedMapCamera(false)
+        setMeasurementSegments([])
+        setPendingLineStart(null)
+        setPendingModeDecisionPoint(null)
+        setPendingModeDecisionAnchor(null)
+        setPointActionMenu(null)
+        setSuppressSuggestionsUntilTyping(false)
+        resetSuperZoom()
+        setProjectHydrated(true)
+        isProjectHydratingRef.current = false
+        return
       }
 
-      setProjectHydrated(false);
-      const project = await db.getProject(projectId);
-      if (!project || cancelled) return;
-      const measurementState = fromProjectMeasurementData(project);
+      setProjectHydrated(false)
+      const project = await db.getProject(projectId)
+      if (!project || cancelled || hydrationEpoch !== projectEpochRef.current) {
+        if (!cancelled && hydrationEpoch === projectEpochRef.current) {
+          isProjectHydratingRef.current = false
+        }
+        return
+      }
+      const measurementState = fromProjectMeasurementData(project)
+      const savedMapCamera = isUsableMapCamera(project.mapCamera)
+        ? project.mapCamera
+        : null
 
-      currentProjectIdRef.current = project.id;
-      setCurrentProjectId(project.id);
-      setQuery(project.location?.formattedAddress ?? project.name);
-      setSuppressSuggestionsUntilTyping(Boolean(project.location));
-      setMeasurementSegments(measurementState.segments);
-      setPendingLineStart(measurementState.pendingLineStart);
-      setPendingModeDecisionPoint(null);
-      setPendingModeDecisionAnchor(null);
-      setPointActionMenu(null);
-      resetSuperZoom();
+      currentProjectIdRef.current = project.id
+      mapCameraRef.current = savedMapCamera
+      pendingMapCameraRestoreRef.current = savedMapCamera
+      lastPersistedGeometryRef.current = {
+        projectId: project.id,
+        signature: measurementGeometrySignature(
+          measurementState.segments,
+          measurementState.pendingLineStart,
+        ),
+      }
+      lastPersistedMapCameraRef.current = {
+        projectId: project.id,
+        signature: mapCameraSignature(savedMapCamera),
+      }
+      setCurrentProjectId(project.id)
+      setQuery(project.location?.formattedAddress ?? project.name)
+      setSuppressSuggestionsUntilTyping(Boolean(project.location))
+      setHasPersistedMapCamera(Boolean(savedMapCamera))
+      setMeasurementSegments(measurementState.segments)
+      setPendingLineStart(measurementState.pendingLineStart)
+      setPendingModeDecisionPoint(null)
+      setPendingModeDecisionAnchor(null)
+      setPointActionMenu(null)
+      resetSuperZoom()
       setSelectedPlace(
         project.location
           ? {
               latitude: project.location.latitude,
-              longitude: project.location.longitude
+              longitude: project.location.longitude,
             }
-          : null
-      );
-      setProjectHydrated(true);
+          : null,
+      )
+      setProjectHydrated(true)
+      isProjectHydratingRef.current = false
     }
 
-    void hydrateProject();
+    void hydrateProject()
 
     return () => {
-      cancelled = true;
-    };
-  }, [pathname, projectId]);
+      cancelled = true
+    }
+  }, [pathname, projectId])
 
   function dismissLocationAlert() {
-    setIsLocationAlertDismissed(true);
+    setIsLocationAlertDismissed(true)
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(LOCATION_ALERT_DISMISSED_KEY, "1");
+      window.localStorage.setItem(LOCATION_ALERT_DISMISSED_KEY, "1")
     }
   }
 
   function restoreLocationAlert() {
-    setIsLocationAlertDismissed(false);
+    setIsLocationAlertDismissed(false)
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem(LOCATION_ALERT_DISMISSED_KEY);
+      window.localStorage.removeItem(LOCATION_ALERT_DISMISSED_KEY)
     }
   }
 
   function resetMeasurementSession() {
-    setMeasurementSegments([]);
-    setPendingLineStart(null);
-    setPendingModeDecisionPoint(null);
-    setPendingModeDecisionAnchor(null);
-    setPointActionMenu(null);
-    setIsMeasurementSettingsOpen(false);
+    setMeasurementSegments([])
+    setPendingLineStart(null)
+    setPendingModeDecisionPoint(null)
+    setPendingModeDecisionAnchor(null)
+    setPointActionMenu(null)
+    setIsMeasurementSettingsOpen(false)
   }
 
   function scheduleProjectionRefresh() {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined") return
     if (projectionRefreshFrameRef.current !== null) {
-      window.cancelAnimationFrame(projectionRefreshFrameRef.current);
+      window.cancelAnimationFrame(projectionRefreshFrameRef.current)
     }
 
     projectionRefreshFrameRef.current = window.requestAnimationFrame(() => {
       projectionRefreshFrameRef.current = window.requestAnimationFrame(() => {
-        projectionRefreshFrameRef.current = null;
-        setProjectionRevision((current) => current + 1);
-      });
-    });
+        projectionRefreshFrameRef.current = null
+        setProjectionRevision((current) => current + 1)
+      })
+    })
   }
 
-  function clampSuperZoomOffsets(scale: number, offsetX: number, offsetY: number) {
-    const bounds = mapViewportRef.current?.getBoundingClientRect();
-    if (!bounds || scale <= 1) {
-      return { x: 0, y: 0 };
-    }
-
-    const minX = bounds.width - bounds.width * scale;
-    const minY = bounds.height - bounds.height * scale;
-
+  function getMapViewport() {
+    const bounds = mapViewportRef.current?.getBoundingClientRect()
+    if (!bounds) return null
     return {
-      x: Math.min(0, Math.max(minX, offsetX)),
-      y: Math.min(0, Math.max(minY, offsetY))
-    };
+      x: bounds.left,
+      y: bounds.top,
+      width: bounds.width,
+      height: bounds.height,
+    }
+  }
+
+  function getPageOffset() {
+    return {
+      x: window.scrollX,
+      y: window.scrollY,
+    }
+  }
+
+  function getMapPageOrigin() {
+    const bounds = mapRef.current?.getBoundingClientRect()
+    if (!bounds) return null
+    const pageOffset = getPageOffset()
+    return {
+      x: bounds.left + pageOffset.x,
+      y: bounds.top + pageOffset.y,
+    }
+  }
+
+  function getMapPagePointFromVisualPagePoint(pagePoint: {
+    x: number
+    y: number
+  }) {
+    const viewport = getMapViewport()
+    const mapPageOrigin = getMapPageOrigin()
+    if (!viewport || !mapPageOrigin) return null
+
+    const mapPagePoint = visualPagePointToMapPagePoint(
+      pagePoint,
+      viewport,
+      getPageOffset(),
+      mapPageOrigin,
+      precisionZoom,
+    )
+    return new DOMPoint(mapPagePoint.x, mapPagePoint.y)
   }
 
   function resetSuperZoom() {
-    setSuperZoomScale(1);
-    setSuperZoomOffsetX(0);
-    setSuperZoomOffsetY(0);
-    superZoomDragRef.current = null;
+    setPrecisionZoom(DEFAULT_PRECISION_ZOOM)
+    superZoomDragRef.current = null
   }
 
   function setSuperZoomLevel(nextScale: number) {
-    if (nextScale <= 1) {
-      resetSuperZoom();
-      return;
-    }
-
-    const bounds = mapViewportRef.current?.getBoundingClientRect();
-    if (!bounds) {
-      const clampedOffsets = clampSuperZoomOffsets(nextScale, superZoomOffsetX, superZoomOffsetY);
-      setSuperZoomScale(nextScale);
-      setSuperZoomOffsetX(clampedOffsets.x);
-      setSuperZoomOffsetY(clampedOffsets.y);
-      return;
-    }
-
-    const centerX = bounds.width / 2;
-    const centerY = bounds.height / 2;
-    const baseCenterX = (centerX - superZoomOffsetX) / superZoomScale;
-    const baseCenterY = (centerY - superZoomOffsetY) / superZoomScale;
-    const nextOffsetX = centerX - baseCenterX * nextScale;
-    const nextOffsetY = centerY - baseCenterY * nextScale;
-    const clampedOffsets = clampSuperZoomOffsets(nextScale, nextOffsetX, nextOffsetY);
-    setSuperZoomScale(nextScale);
-    setSuperZoomOffsetX(clampedOffsets.x);
-    setSuperZoomOffsetY(clampedOffsets.y);
+    const viewport = getMapViewport()
+    if (!viewport) return
+    setPrecisionZoom((current) =>
+      zoomAroundViewportCenter(current, nextScale, viewport),
+    )
   }
 
-  function appendMeasurementSegment(start: MeasurementPoint, end: MeasurementPoint) {
+  function appendMeasurementSegment(
+    start: MeasurementPoint,
+    end: MeasurementPoint,
+  ) {
     setMeasurementSegments((currentSegments) => [
       ...currentSegments,
       {
         id: `${Date.now()}-${currentSegments.length}`,
         start,
-        end
-      }
-    ]);
+        end,
+      },
+    ])
+  }
+
+  function readMapCamera(): MapCameraState | null {
+    const region = mapInstanceRef.current?.region
+    const centerLat = region?.center.latitude
+    const centerLng = region?.center.longitude
+    const latSpan = region?.span.latitudeDelta
+    const lngSpan = region?.span.longitudeDelta
+    if (
+      typeof centerLat !== "number" ||
+      typeof centerLng !== "number" ||
+      typeof latSpan !== "number" ||
+      typeof lngSpan !== "number"
+    ) {
+      return null
+    }
+
+    const camera = { centerLat, centerLng, latSpan, lngSpan }
+    return isUsableMapCamera(camera) ? camera : null
+  }
+
+  function restoreMapCamera(camera: MapCameraState) {
+    const mapkit = window.mapkit
+    const map = mapInstanceRef.current
+    if (!mapkit || !map) return
+
+    map.region = new mapkit.CoordinateRegion(
+      new mapkit.Coordinate(camera.centerLat, camera.centerLng),
+      new mapkit.CoordinateSpan(camera.latSpan, camera.lngSpan),
+    )
+  }
+
+  function scheduleMapCameraSave() {
+    const camera = readMapCamera()
+    const targetProjectId = currentProjectIdRef.current
+    if (!camera || !targetProjectId || isProjectHydratingRef.current) return
+
+    mapCameraRef.current = camera
+    setHasPersistedMapCamera(true)
+    const signature = mapCameraSignature(camera)
+    if (
+      lastPersistedMapCameraRef.current?.projectId === targetProjectId &&
+      lastPersistedMapCameraRef.current.signature === signature
+    ) {
+      return
+    }
+
+    if (cameraSaveTimerRef.current !== null) {
+      window.clearTimeout(cameraSaveTimerRef.current)
+    }
+
+    const projectEpoch = projectEpochRef.current
+    cameraSaveTimerRef.current = window.setTimeout(() => {
+      cameraSaveTimerRef.current = null
+      if (
+        projectEpoch !== projectEpochRef.current ||
+        currentProjectIdRef.current !== targetProjectId
+      )
+        return
+      void saveProjectSnapshot({
+        mapCamera: camera,
+        targetProjectId,
+        projectEpoch,
+      }).catch(() => undefined)
+    }, MAP_CAMERA_SAVE_DELAY_MS)
+  }
+
+  function prepareForAddressSelection() {
+    resetSuperZoom()
+    mapCameraRef.current = null
+    pendingMapCameraRestoreRef.current = null
+    setHasPersistedMapCamera(false)
   }
 
   async function saveProjectSnapshot(options?: {
-    projectName?: string;
-    location?: PropertyLocation | null;
-    measurementSegments?: MeasurementSegment[];
-    pendingLineStart?: MeasurementPoint | null;
+    projectName?: string
+    location?: PropertyLocation | null
+    measurementSegments?: MeasurementSegment[]
+    pendingLineStart?: MeasurementPoint | null
+    mapCamera?: MapCameraState | null
+    targetProjectId?: string | null
+    projectEpoch?: number
   }) {
-    const snapshotSegments = options?.measurementSegments ?? measurementSegments;
-    const snapshotPendingLineStart = options?.pendingLineStart ?? pendingLineStart;
-    const snapshotQuery = query.trim();
-    const snapshotLocation = options?.location;
-    const snapshotProjectName = options?.projectName;
+    const snapshotSegments = options?.measurementSegments ?? measurementSegments
+    const snapshotPendingLineStart =
+      options && "pendingLineStart" in options
+        ? (options.pendingLineStart ?? null)
+        : pendingLineStart
+    const snapshotQuery = query.trim()
+    const snapshotLocation = options?.location
+    const snapshotProjectName = options?.projectName
+    const targetProjectId =
+      options && "targetProjectId" in options
+        ? (options.targetProjectId ?? null)
+        : currentProjectIdRef.current
+    const projectEpoch = options?.projectEpoch ?? projectEpochRef.current
+    const hasExplicitMapCamera = Boolean(options && "mapCamera" in options)
+    const snapshotMapCamera = hasExplicitMapCamera
+      ? (options?.mapCamera ?? null)
+      : mapCameraRef.current
+    const geometrySignature = measurementGeometrySignature(
+      snapshotSegments,
+      snapshotPendingLineStart,
+    )
 
     const persistSnapshot = async () => {
-      const geometry = toProjectMeasurementData(snapshotSegments, snapshotPendingLineStart);
-      const existingProject =
-        currentProjectIdRef.current ? await db.getProject(currentProjectIdRef.current) : undefined;
+      if (projectEpoch !== projectEpochRef.current) return null
+      const geometry = toProjectMeasurementData(
+        snapshotSegments,
+        snapshotPendingLineStart,
+      )
+      const existingProject = targetProjectId
+        ? await db.getProject(targetProjectId)
+        : undefined
+      if (
+        projectEpoch !== projectEpochRef.current ||
+        (targetProjectId && !existingProject)
+      )
+        return null
       const projectName =
         snapshotProjectName ??
         existingProject?.name ??
-        (snapshotQuery || snapshotLocation?.formattedAddress || "Untitled Project");
-      const baseProject = existingProject ?? createEmptyProject(projectName);
+        (snapshotQuery ||
+          snapshotLocation?.formattedAddress ||
+          "Untitled Project")
+      const baseProject = existingProject ?? createEmptyProject(projectName)
       const savedProject = await db.saveProject({
         ...baseProject,
         name: projectName,
-        location: snapshotLocation === undefined ? baseProject.location : snapshotLocation ?? undefined,
+        location:
+          snapshotLocation === undefined
+            ? baseProject.location
+            : (snapshotLocation ?? undefined),
         measurementGeometry: geometry.measurementGeometry,
         points: geometry.points,
         segments: geometry.segments,
         groups: [],
         planes: [],
-        lastOpenedAt: new Date().toISOString()
-      });
+        mapCamera: hasExplicitMapCamera
+          ? (snapshotMapCamera ?? undefined)
+          : (snapshotMapCamera ?? baseProject.mapCamera),
+        lastOpenedAt: new Date().toISOString(),
+      })
 
-      if (currentProjectIdRef.current !== savedProject.id) {
-        currentProjectIdRef.current = savedProject.id;
-        setCurrentProjectId(savedProject.id);
-        router.replace(`/?projectId=${savedProject.id}`);
+      if (projectEpoch !== projectEpochRef.current) return savedProject
+
+      lastPersistedGeometryRef.current = {
+        projectId: savedProject.id,
+        signature: geometrySignature,
+      }
+      lastPersistedMapCameraRef.current = {
+        projectId: savedProject.id,
+        signature: mapCameraSignature(savedProject.mapCamera ?? null),
       }
 
-      return savedProject;
-    };
+      if (currentProjectIdRef.current !== savedProject.id) {
+        currentProjectIdRef.current = savedProject.id
+        setCurrentProjectId(savedProject.id)
+        router.replace(`/?projectId=${savedProject.id}`)
+      }
 
-    const queuedSave = saveQueueRef.current.then(persistSnapshot, persistSnapshot);
-    saveQueueRef.current = queuedSave.then(() => undefined, () => undefined);
-    return queuedSave;
+      return savedProject
+    }
+
+    const queuedSave = saveQueueRef.current.then(
+      persistSnapshot,
+      persistSnapshot,
+    )
+    saveQueueRef.current = queuedSave.then(
+      () => undefined,
+      () => undefined,
+    )
+    return queuedSave
   }
 
-  function updateMeasurementPointsMatching(sourcePoint: MeasurementPoint, nextPoint: MeasurementPoint) {
-    const sourceKey = measurementPointKey(sourcePoint);
+  function updateMeasurementPointsMatching(
+    sourcePoint: MeasurementPoint,
+    nextPoint: MeasurementPoint,
+  ) {
+    const sourceKey = measurementPointKey(sourcePoint)
 
     setMeasurementSegments((currentSegments) =>
       currentSegments.map((segment) => ({
         ...segment,
-        start: measurementPointKey(segment.start) === sourceKey ? nextPoint : segment.start,
-        end: measurementPointKey(segment.end) === sourceKey ? nextPoint : segment.end
-      }))
-    );
+        start:
+          measurementPointKey(segment.start) === sourceKey
+            ? nextPoint
+            : segment.start,
+        end:
+          measurementPointKey(segment.end) === sourceKey
+            ? nextPoint
+            : segment.end,
+      })),
+    )
     setPendingLineStart((currentPoint) =>
-      currentPoint && measurementPointKey(currentPoint) === sourceKey ? nextPoint : currentPoint
-    );
+      currentPoint && measurementPointKey(currentPoint) === sourceKey
+        ? nextPoint
+        : currentPoint,
+    )
     setPendingModeDecisionPoint((currentPoint) =>
-      currentPoint && measurementPointKey(currentPoint) === sourceKey ? nextPoint : currentPoint
-    );
+      currentPoint && measurementPointKey(currentPoint) === sourceKey
+        ? nextPoint
+        : currentPoint,
+    )
   }
 
-  function getViewportAnchorFromPagePoint(pointOnPage: DOMPoint): DecisionAnchor | null {
-    const bounds = mapViewportRef.current?.getBoundingClientRect();
-    if (!bounds) return null;
-    return {
-      x: pointOnPage.x - bounds.left,
-      y: pointOnPage.y - bounds.top
-    };
+  function getViewportAnchorFromPagePoint(
+    pointOnPage: DOMPoint,
+  ): DecisionAnchor | null {
+    const mapPageOrigin = getMapPageOrigin()
+    if (!mapPageOrigin) return null
+    const basePoint = mapPagePointToBaseViewportPoint(
+      pointOnPage,
+      mapPageOrigin,
+    )
+    return baseViewportPointToVisualViewportPoint(basePoint, precisionZoom)
   }
 
-  function projectSuperZoomX(x: number) {
-    return x * superZoomScale + superZoomOffsetX;
-  }
-
-  function projectSuperZoomY(y: number) {
-    return y * superZoomScale + superZoomOffsetY;
-  }
-
-  function normalizeViewportXToBaseLayer(x: number) {
-    return (x - superZoomOffsetX) / superZoomScale;
-  }
-
-  function normalizeViewportYToBaseLayer(y: number) {
-    return (y - superZoomOffsetY) / superZoomScale;
-  }
-
-  function handleTappedCoordinate(tappedPoint: MeasurementPoint, anchor: DecisionAnchor | null) {
-    setPointActionMenu(null);
+  function handleTappedCoordinate(
+    tappedPoint: MeasurementPoint,
+    anchor: DecisionAnchor | null,
+  ) {
+    setPointActionMenu(null)
 
     if (!pendingLineStart) {
-      setPendingLineStart(tappedPoint);
-      setPendingModeDecisionPoint(null);
-      setPendingModeDecisionAnchor(null);
-      return;
+      setPendingLineStart(tappedPoint)
+      setPendingModeDecisionPoint(null)
+      setPendingModeDecisionAnchor(null)
+      return
     }
 
-    setPendingModeDecisionPoint(tappedPoint);
-    setPendingModeDecisionAnchor(anchor);
+    setPendingModeDecisionPoint(tappedPoint)
+    setPendingModeDecisionAnchor(anchor)
   }
 
-  function handlePointOnPage(pointOnPage: DOMPoint, anchor?: DecisionAnchor | null) {
-    const map = mapInstanceRef.current;
-    if (!map || pendingModeDecisionPoint) return;
+  function handlePointOnPage(
+    pointOnPage: DOMPoint,
+    anchor?: DecisionAnchor | null,
+  ) {
+    const map = mapInstanceRef.current
+    if (!map || pendingModeDecisionPoint) return
 
-    const coordinate = map.convertPointOnPageToCoordinate(pointOnPage);
-    handleTappedCoordinate({
-      latitude: coordinate.latitude ?? 0,
-      longitude: coordinate.longitude ?? 0
-    }, anchor ?? getViewportAnchorFromPagePoint(pointOnPage));
+    const coordinate = map.convertPointOnPageToCoordinate(pointOnPage)
+    const latitude = coordinate.latitude
+    const longitude = coordinate.longitude
+    if (
+      typeof latitude !== "number" ||
+      typeof longitude !== "number" ||
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude)
+    ) {
+      return
+    }
+    handleTappedCoordinate(
+      {
+        latitude,
+        longitude,
+      },
+      anchor ?? getViewportAnchorFromPagePoint(pointOnPage),
+    )
   }
 
   function applyMeasurementModeChoice(mode: "continue" | "start-new") {
-    const decisionPoint = pendingModeDecisionPoint;
-    setPendingModeDecisionPoint(null);
-    setPendingModeDecisionAnchor(null);
-    setPointActionMenu(null);
-    setIsMeasurementSettingsOpen(false);
+    const decisionPoint = pendingModeDecisionPoint
+    setPendingModeDecisionPoint(null)
+    setPendingModeDecisionAnchor(null)
+    setPointActionMenu(null)
+    setIsMeasurementSettingsOpen(false)
 
-    if (!decisionPoint) return;
+    if (!decisionPoint) return
 
     if (mode === "continue" && pendingLineStart) {
-      appendMeasurementSegment(pendingLineStart, decisionPoint);
-      setPendingLineStart(decisionPoint);
-      return;
+      appendMeasurementSegment(pendingLineStart, decisionPoint)
+      setPendingLineStart(decisionPoint)
+      return
     }
 
-    setPendingLineStart(decisionPoint);
+    setPendingLineStart(decisionPoint)
   }
 
   function removeAnnotation(annotationRef: React.MutableRefObject<unknown>) {
-    const map = mapInstanceRef.current;
-    if (!map || !annotationRef.current) return;
-    map.removeAnnotation(annotationRef.current);
-    annotationRef.current = null;
+    const map = mapInstanceRef.current
+    if (!map || !annotationRef.current) return
+    map.removeAnnotation(annotationRef.current)
+    annotationRef.current = null
   }
 
   function clearMeasurementVisuals() {
-    const map = mapInstanceRef.current;
+    const map = mapInstanceRef.current
     if (!map) {
-      measurementPointAnnotationRefs.current = [];
-      measurementLineOverlayRefs.current = [];
-      measurementLabelAnnotationRefs.current = [];
-      return;
+      measurementPointAnnotationRefs.current = []
+      measurementLineOverlayRefs.current = []
+      measurementLabelAnnotationRefs.current = []
+      return
     }
 
-    measurementPointAnnotationRefs.current.forEach((annotation) => map.removeAnnotation(annotation));
-    measurementLabelAnnotationRefs.current.forEach((annotation) => map.removeAnnotation(annotation));
-    measurementLineOverlayRefs.current.forEach((overlay) => map.removeOverlay(overlay));
-    measurementPointAnnotationRefs.current = [];
-    measurementLineOverlayRefs.current = [];
-    measurementLabelAnnotationRefs.current = [];
+    measurementPointAnnotationRefs.current.forEach((annotation) =>
+      map.removeAnnotation(annotation),
+    )
+    measurementLabelAnnotationRefs.current.forEach((annotation) =>
+      map.removeAnnotation(annotation),
+    )
+    measurementLineOverlayRefs.current.forEach((overlay) =>
+      map.removeOverlay(overlay),
+    )
+    measurementPointAnnotationRefs.current = []
+    measurementLineOverlayRefs.current = []
+    measurementLabelAnnotationRefs.current = []
   }
 
   function syncMeasurementVisuals() {
-    const mapkit = window.mapkit;
-    const map = mapInstanceRef.current;
-    if (!mapkit || !map) return;
+    const mapkit = window.mapkit
+    const map = mapInstanceRef.current
+    if (!mapkit || !map) return
 
-    clearMeasurementVisuals();
+    clearMeasurementVisuals()
   }
 
   function openPointActionMenu(point: ProjectedMeasurementPoint) {
-    setPendingModeDecisionPoint(null);
-    setPendingModeDecisionAnchor(null);
+    setPendingModeDecisionPoint(null)
+    setPendingModeDecisionAnchor(null)
+    const visualPoint = baseViewportPointToVisualViewportPoint(
+      { x: point.x, y: point.y },
+      precisionZoom,
+    )
     setPointActionMenu({
       point: {
         latitude: point.latitude,
-        longitude: point.longitude
+        longitude: point.longitude,
       },
-      anchor: {
-        x: projectSuperZoomX(point.x),
-        y: projectSuperZoomY(point.y)
-      }
-    });
+      anchor: visualPoint,
+    })
   }
 
   function handleTieInPoint(point: MeasurementPoint) {
-    setPendingModeDecisionPoint(null);
-    setPendingModeDecisionAnchor(null);
-    setPendingLineStart(point);
-    setPointActionMenu(null);
+    setPendingModeDecisionPoint(null)
+    setPendingModeDecisionAnchor(null)
+    setPendingLineStart(point)
+    setPointActionMenu(null)
   }
 
   function handleDeletePoint(point: MeasurementPoint) {
-    const targetKey = measurementPointKey(point);
+    const targetKey = measurementPointKey(point)
     setMeasurementSegments((currentSegments) =>
       currentSegments.filter(
         (segment) =>
-          measurementPointKey(segment.start) !== targetKey && measurementPointKey(segment.end) !== targetKey
-      )
-    );
+          measurementPointKey(segment.start) !== targetKey &&
+          measurementPointKey(segment.end) !== targetKey,
+      ),
+    )
     setPendingLineStart((currentPoint) =>
-      currentPoint && measurementPointKey(currentPoint) === targetKey ? null : currentPoint
-    );
+      currentPoint && measurementPointKey(currentPoint) === targetKey
+        ? null
+        : currentPoint,
+    )
     setPendingModeDecisionPoint((currentPoint) =>
-      currentPoint && measurementPointKey(currentPoint) === targetKey ? null : currentPoint
-    );
-    setPointActionMenu(null);
+      currentPoint && measurementPointKey(currentPoint) === targetKey
+        ? null
+        : currentPoint,
+    )
+    setPointActionMenu(null)
   }
-
-  const overlayVisualScale = 1 / superZoomScale;
-  const pointButtonSize = 28 * overlayVisualScale;
-  const pointDotSize = 10 * overlayVisualScale;
-  const pointDotBorderWidth = 2 * overlayVisualScale;
-  const segmentStrokeWidth = 3 * overlayVisualScale;
-  const segmentDash = `${6 * overlayVisualScale} ${6 * overlayVisualScale}`;
-  const labelWidth = 48 * overlayVisualScale;
-  const labelHeight = 20 * overlayVisualScale;
-  const labelRadius = 10 * overlayVisualScale;
-  const labelOffsetX = 24 * overlayVisualScale;
-  const labelOffsetY = 10 * overlayVisualScale;
-  const labelFontSize = 10 * overlayVisualScale;
-  const pointShadow = `0 ${6 * overlayVisualScale}px ${18 * overlayVisualScale}px rgba(20, 24, 22, 0.22)`;
 
   function buildProjectedMeasurementOverlay(): ProjectedMeasurementOverlay {
     if (typeof window === "undefined") {
-      return EMPTY_PROJECTED_MEASUREMENT_OVERLAY;
+      return EMPTY_PROJECTED_MEASUREMENT_OVERLAY
     }
 
-    const mapkit = window.mapkit;
-    const map = mapInstanceRef.current;
-    const bounds = mapViewportRef.current?.getBoundingClientRect();
-    if (!mapkit || !map || !bounds) {
-      return EMPTY_PROJECTED_MEASUREMENT_OVERLAY;
+    const mapkit = window.mapkit
+    const map = mapInstanceRef.current
+    const mapPageOrigin = getMapPageOrigin()
+    if (!mapkit || !map || !mapPageOrigin) {
+      return EMPTY_PROJECTED_MEASUREMENT_OVERLAY
     }
 
-    const coordinateCtor = mapkit.Coordinate;
-    const points = new Map<string, ProjectedMeasurementPoint>();
+    const coordinateCtor = mapkit.Coordinate
+    const points = new Map<string, ProjectedMeasurementPoint>()
     const segments = measurementSegments.map((segment) => {
       const startPagePoint = map.convertCoordinateToPointOnPage(
-        new coordinateCtor(segment.start.latitude, segment.start.longitude)
-      );
+        new coordinateCtor(segment.start.latitude, segment.start.longitude),
+      )
       const endPagePoint = map.convertCoordinateToPointOnPage(
-        new coordinateCtor(segment.end.latitude, segment.end.longitude)
-      );
-      const startX = normalizeViewportXToBaseLayer(startPagePoint.x - bounds.left);
-      const startY = normalizeViewportYToBaseLayer(startPagePoint.y - bounds.top);
-      const endX = normalizeViewportXToBaseLayer(endPagePoint.x - bounds.left);
-      const endY = normalizeViewportYToBaseLayer(endPagePoint.y - bounds.top);
-      const dx = endX - startX;
-      const dy = endY - startY;
-      const length = Math.hypot(dx, dy) || 1;
-      const offsetX = (-dy / length) * 34;
-      const offsetY = (dx / length) * 34;
-      const startKey = measurementPointKey(segment.start);
-      const endKey = measurementPointKey(segment.end);
+        new coordinateCtor(segment.end.latitude, segment.end.longitude),
+      )
+      const start = mapPagePointToBaseViewportPoint(
+        startPagePoint,
+        mapPageOrigin,
+      )
+      const end = mapPagePointToBaseViewportPoint(endPagePoint, mapPageOrigin)
+      const startX = start.x
+      const startY = start.y
+      const endX = end.x
+      const endY = end.y
+      const startKey = measurementPointKey(segment.start)
+      const endKey = measurementPointKey(segment.end)
 
       if (!points.has(startKey)) {
         points.set(startKey, {
@@ -582,8 +873,8 @@ export default function MapKitTestPage() {
           key: startKey,
           x: startX,
           y: startY,
-          tone: "solid"
-        });
+          tone: "solid",
+        })
       }
 
       if (!points.has(endKey)) {
@@ -592,8 +883,8 @@ export default function MapKitTestPage() {
           key: endKey,
           x: endX,
           y: endY,
-          tone: "solid"
-        });
+          tone: "solid",
+        })
       }
 
       return {
@@ -602,60 +893,60 @@ export default function MapKitTestPage() {
         startY,
         endX,
         endY,
-        labelX: (startX + endX) / 2 + offsetX,
-        labelY: (startY + endY) / 2 + offsetY,
         label: `${Math.round(
           haversineDistanceFeet(
             { lat: segment.start.latitude, lng: segment.start.longitude },
-            { lat: segment.end.latitude, lng: segment.end.longitude }
-          )
-        )}'`
-      };
-    });
+            { lat: segment.end.latitude, lng: segment.end.longitude },
+          ),
+        )}'`,
+      }
+    })
 
     if (pendingLineStart) {
       const pendingPagePoint = map.convertCoordinateToPointOnPage(
-        new coordinateCtor(pendingLineStart.latitude, pendingLineStart.longitude)
-      );
+        new coordinateCtor(
+          pendingLineStart.latitude,
+          pendingLineStart.longitude,
+        ),
+      )
       points.set(measurementPointKey(pendingLineStart), {
         ...pendingLineStart,
         key: measurementPointKey(pendingLineStart),
-        x: normalizeViewportXToBaseLayer(pendingPagePoint.x - bounds.left),
-        y: normalizeViewportYToBaseLayer(pendingPagePoint.y - bounds.top),
-        tone: "pending"
-      });
+        ...mapPagePointToBaseViewportPoint(pendingPagePoint, mapPageOrigin),
+        tone: "pending",
+      })
     }
 
     return {
       segments,
-      points: Array.from(points.values())
-    };
+      points: Array.from(points.values()),
+    }
   }
 
   useEffect(() => {
     if (!mapReady) {
-      setProjectedMeasurementOverlay(EMPTY_PROJECTED_MEASUREMENT_OVERLAY);
-      return;
+      setProjectedMeasurementOverlay(EMPTY_PROJECTED_MEASUREMENT_OVERLAY)
+      return
     }
 
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined") return
 
-    let cancelled = false;
-    let frameA = 0;
-    let frameB = 0;
+    let cancelled = false
+    let frameA = 0
+    let frameB = 0
 
     frameA = window.requestAnimationFrame(() => {
       frameB = window.requestAnimationFrame(() => {
-        if (cancelled) return;
-        setProjectedMeasurementOverlay(buildProjectedMeasurementOverlay());
-      });
-    });
+        if (cancelled) return
+        setProjectedMeasurementOverlay(buildProjectedMeasurementOverlay())
+      })
+    })
 
     return () => {
-      cancelled = true;
-      window.cancelAnimationFrame(frameA);
-      window.cancelAnimationFrame(frameB);
-    };
+      cancelled = true
+      window.cancelAnimationFrame(frameA)
+      window.cancelAnimationFrame(frameB)
+    }
   }, [
     mapReady,
     projectHydrated,
@@ -663,294 +954,355 @@ export default function MapKitTestPage() {
     pendingLineStart,
     projectionRevision,
     selectedPlace,
-    currentProjectId
-  ]);
+    currentProjectId,
+  ])
 
-  function syncSelectedPlaceAnnotation(place: { latitude: number; longitude: number } | null) {
-    const mapkit = window.mapkit;
-    const map = mapInstanceRef.current;
-    if (!mapkit?.MarkerAnnotation || !map) return;
+  function syncSelectedPlaceAnnotation(
+    place: { latitude: number; longitude: number } | null,
+  ) {
+    const mapkit = window.mapkit
+    const map = mapInstanceRef.current
+    if (!mapkit?.MarkerAnnotation || !map) return
 
-    removeAnnotation(selectedPlaceAnnotationRef);
+    removeAnnotation(selectedPlaceAnnotationRef)
 
-    if (!place) return;
+    if (!place) return
 
-    const annotation = new mapkit.MarkerAnnotation(new mapkit.Coordinate(place.latitude, place.longitude), {
-      color: "#d94b3d"
-    });
-    selectedPlaceAnnotationRef.current = annotation;
-    map.addAnnotation(annotation);
+    const annotation = new mapkit.MarkerAnnotation(
+      new mapkit.Coordinate(place.latitude, place.longitude),
+      {
+        color: "#d94b3d",
+      },
+    )
+    selectedPlaceAnnotationRef.current = annotation
+    map.addAnnotation(annotation)
   }
 
-  function syncCurrentLocationAnnotation(location: { latitude: number; longitude: number } | null) {
-    const mapkit = window.mapkit;
-    const map = mapInstanceRef.current;
-    if (!mapkit?.Annotation || !map) return;
+  function syncCurrentLocationAnnotation(
+    location: { latitude: number; longitude: number } | null,
+  ) {
+    const mapkit = window.mapkit
+    const map = mapInstanceRef.current
+    if (!mapkit?.Annotation || !map) return
 
-    removeAnnotation(currentLocationAnnotationRef);
+    removeAnnotation(currentLocationAnnotationRef)
 
-    if (!location) return;
+    if (!location) return
 
     const annotation = new mapkit.Annotation(
       new mapkit.Coordinate(location.latitude, location.longitude),
       () => {
-        const element = document.createElement("div");
-        element.style.width = "14px";
-        element.style.height = "14px";
-        element.style.borderRadius = "999px";
-        element.style.background = "#0a84ff";
-        element.style.border = "3px solid rgba(255,255,255,0.95)";
-        element.style.boxShadow = "0 0 0 6px rgba(10, 132, 255, 0.18), 0 6px 18px rgba(10, 132, 255, 0.28)";
-        return element;
+        const element = document.createElement("div")
+        element.style.width = "14px"
+        element.style.height = "14px"
+        element.style.borderRadius = "999px"
+        element.style.background = "#0a84ff"
+        element.style.border = "3px solid rgba(255,255,255,0.95)"
+        element.style.boxShadow =
+          "0 0 0 6px rgba(10, 132, 255, 0.18), 0 6px 18px rgba(10, 132, 255, 0.28)"
+        return element
       },
       {
-        size: { width: 14, height: 14 }
-      }
-    );
+        size: { width: 14, height: 14 },
+      },
+    )
 
-    currentLocationAnnotationRef.current = annotation;
-    map.addAnnotation(annotation);
+    currentLocationAnnotationRef.current = annotation
+    map.addAnnotation(annotation)
   }
 
   async function loadCurrentLocation() {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
-      setLocationState("unsupported");
-      setLocationAlert("Location access is unavailable in this browser. Search will still work, but results may be less local.");
-      return;
+      setLocationState("unsupported")
+      setLocationAlert(
+        "Location access is unavailable in this browser. Search will still work, but results may be less local.",
+      )
+      return
     }
 
-    setLocationState("requesting");
+    setLocationState("requesting")
 
     try {
-      const position = await requestCurrentLocation();
+      const position = await requestCurrentLocation()
       setLocationBias({
         centerLat: position.coords.latitude,
         centerLng: position.coords.longitude,
         latSpan: 0.2,
         lngSpan: 0.2,
-        countryCode: "US"
-      });
+        countryCode: "US",
+      })
       setCurrentLocation({
         latitude: position.coords.latitude,
-        longitude: position.coords.longitude
-      });
-      restoreLocationAlert();
-      setLocationState("granted");
-      setLocationAlert("");
+        longitude: position.coords.longitude,
+      })
+      restoreLocationAlert()
+      setLocationState("granted")
+      setLocationAlert("")
     } catch (error) {
       const geolocationError =
-        error && typeof error === "object" && "code" in error ? (error as GeolocationPositionError) : null;
+        error && typeof error === "object" && "code" in error
+          ? (error as GeolocationPositionError)
+          : null
 
       if (geolocationError) {
         if (geolocationError.code === geolocationError.PERMISSION_DENIED) {
-          setLocationState("denied");
-          setLocationAlert(`Location access is denied for this site. ${safariLocationHelp}`);
-          return;
+          setLocationState("denied")
+          setLocationAlert(
+            `Location access is denied for this site. ${safariLocationHelp}`,
+          )
+          return
         }
 
         if (geolocationError.code === geolocationError.POSITION_UNAVAILABLE) {
-          setLocationState("error");
-          setLocationAlert("Your permission is granted, but your location is currently unavailable. Search will continue without local bias.");
-          return;
+          setLocationState("error")
+          setLocationAlert(
+            "Your permission is granted, but your location is currently unavailable. Search will continue without local bias.",
+          )
+          return
         }
 
         if (geolocationError.code === geolocationError.TIMEOUT) {
-          setLocationState("error");
-          setLocationAlert("Location lookup timed out. Try again to improve nearby address suggestions.");
-          return;
+          setLocationState("error")
+          setLocationAlert(
+            "Location lookup timed out. Try again to improve nearby address suggestions.",
+          )
+          return
         }
       }
 
-      setLocationState("error");
-      setLocationAlert("We could not get your location right now. Search will continue without local bias.");
+      setLocationState("error")
+      setLocationAlert(
+        "We could not get your location right now. Search will continue without local bias.",
+      )
     }
   }
 
   useEffect(() => {
-    let cancelled = false;
+    let cancelled = false
 
     async function run() {
       try {
-        await loadMapKit();
-        const mapkit = window.mapkit;
+        await loadMapKit()
+        const mapkit = window.mapkit
 
-        if (cancelled || !mapRef.current) return;
+        if (cancelled || !mapRef.current) return
         if (!mapkit) {
-          setSearchState("error");
-          setSearchMessage("MapKit did not finish loading.");
-          return;
+          setSearchState("error")
+          setSearchMessage("MapKit did not finish loading.")
+          return
         }
 
-        const center = new mapkit.Coordinate(39.5501, -105.7821);
-        const span = new mapkit.CoordinateSpan(0.04, 0.04);
-        const region = new mapkit.CoordinateRegion(center, span);
+        const center = new mapkit.Coordinate(39.5501, -105.7821)
+        const span = new mapkit.CoordinateSpan(0.04, 0.04)
+        const region = new mapkit.CoordinateRegion(center, span)
 
         mapInstanceRef.current = new mapkit.Map(mapRef.current, {
           region,
           showsCompass: "visible",
           showsMapTypeControl: true,
-          mapType: mapkit.MapType?.Standard
-        });
-        setMapReady(true);
+          mapType: mapkit.MapType?.Standard,
+        })
+        setMapReady(true)
       } catch (error) {
-        console.error("MapKit test page failed to initialize.", error);
-        setSearchState("error");
-        setSearchMessage(error instanceof Error ? error.message : "Map initialization failed.");
+        console.error("MapKit test page failed to initialize.", error)
+        setSearchState("error")
+        setSearchMessage(
+          error instanceof Error ? error.message : "Map initialization failed.",
+        )
       }
     }
 
-    void run();
+    void run()
 
     return () => {
-      cancelled = true;
-      if (typeof window !== "undefined" && projectionRefreshFrameRef.current !== null) {
-        window.cancelAnimationFrame(projectionRefreshFrameRef.current);
-        projectionRefreshFrameRef.current = null;
+      cancelled = true
+      if (
+        typeof window !== "undefined" &&
+        projectionRefreshFrameRef.current !== null
+      ) {
+        window.cancelAnimationFrame(projectionRefreshFrameRef.current)
+        projectionRefreshFrameRef.current = null
       }
-      setMapReady(false);
-      clearMeasurementVisuals();
-      selectedPlaceAnnotationRef.current = null;
-      currentLocationAnnotationRef.current = null;
-      mapInstanceRef.current?.destroy?.();
-      mapInstanceRef.current = null;
-    };
-  }, []);
+      if (
+        typeof window !== "undefined" &&
+        cameraSaveTimerRef.current !== null
+      ) {
+        window.clearTimeout(cameraSaveTimerRef.current)
+        cameraSaveTimerRef.current = null
+      }
+      setMapReady(false)
+      clearMeasurementVisuals()
+      selectedPlaceAnnotationRef.current = null
+      currentLocationAnnotationRef.current = null
+      mapInstanceRef.current?.destroy?.()
+      mapInstanceRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
-    if (!mapReady || !mapViewportRef.current || !mapInstanceRef.current) return;
+    if (!mapReady || !projectHydrated) return
+    const camera = pendingMapCameraRestoreRef.current
+    if (!camera) return
+
+    restoreMapCamera(camera)
+    pendingMapCameraRestoreRef.current = null
+    scheduleProjectionRefresh()
+  }, [currentProjectId, mapReady, projectHydrated])
+
+  useEffect(() => {
+    if (!mapReady || !mapViewportRef.current || !mapInstanceRef.current) return
 
     function refreshProjectionMetrics() {
-      setProjectionRevision((current) => current + 1);
+      setProjectionRevision((current) => current + 1)
+      setPointActionMenu(null)
+      scheduleMapCameraSave()
     }
 
-    const map = mapInstanceRef.current;
-    map.addEventListener("region-change-end", refreshProjectionMetrics);
-    map.addEventListener("scroll-end", refreshProjectionMetrics);
-    map.addEventListener("zoom-end", refreshProjectionMetrics);
+    const map = mapInstanceRef.current
+    map.addEventListener("region-change-end", refreshProjectionMetrics)
+    map.addEventListener("scroll-end", refreshProjectionMetrics)
+    map.addEventListener("zoom-end", refreshProjectionMetrics)
 
-    const resizeObserver = new ResizeObserver(refreshProjectionMetrics);
-    resizeObserver.observe(mapViewportRef.current);
-    refreshProjectionMetrics();
+    const resizeObserver = new ResizeObserver(refreshProjectionMetrics)
+    resizeObserver.observe(mapViewportRef.current)
+    refreshProjectionMetrics()
 
     return () => {
-      map.removeEventListener("region-change-end", refreshProjectionMetrics);
-      map.removeEventListener("scroll-end", refreshProjectionMetrics);
-      map.removeEventListener("zoom-end", refreshProjectionMetrics);
-      resizeObserver.disconnect();
-    };
-  }, [mapReady]);
+      map.removeEventListener("region-change-end", refreshProjectionMetrics)
+      map.removeEventListener("scroll-end", refreshProjectionMetrics)
+      map.removeEventListener("zoom-end", refreshProjectionMetrics)
+      resizeObserver.disconnect()
+    }
+  }, [mapReady])
 
   useEffect(() => {
-    if (!mapReady || !projectHydrated) return;
-    if (measurementSegments.length === 0 && !pendingLineStart) return;
-    scheduleProjectionRefresh();
-  }, [mapReady, projectHydrated, measurementSegments, pendingLineStart]);
+    if (!mapReady || !projectHydrated) return
+    if (measurementSegments.length === 0 && !pendingLineStart) return
+    scheduleProjectionRefresh()
+  }, [mapReady, projectHydrated, measurementSegments, pendingLineStart])
 
   useEffect(() => {
-    let permissionStatus: PermissionStatus | null = null;
-    let cancelled = false;
+    let permissionStatus: PermissionStatus | null = null
+    let cancelled = false
 
     async function refreshLocationPermission() {
-      const permission = await getLocationPermission();
-      if (cancelled) return;
+      const permission = await getLocationPermission()
+      if (cancelled) return
 
       if (permissionStatus) {
-        permissionStatus.onchange = null;
-        permissionStatus = null;
+        permissionStatus.onchange = null
+        permissionStatus = null
       }
 
       if (permission === "granted") {
-        setLocationState("granted");
-        restoreLocationAlert();
+        setLocationState("granted")
+        restoreLocationAlert()
         if (!locationBiasRef.current) {
-          setLocationAlert("");
-          void loadCurrentLocation();
+          setLocationAlert("")
+          void loadCurrentLocation()
         } else {
-          setLocationAlert("");
+          setLocationAlert("")
         }
-        return;
+        return
       }
 
       if (permission === "denied") {
-        setLocationState("denied");
-        setLocationAlert(`Location access is denied for this site. ${safariLocationHelp}`);
-        return;
+        setLocationState("denied")
+        setLocationAlert(
+          `Location access is denied for this site. ${safariLocationHelp}`,
+        )
+        return
       }
 
       if (permission === "prompt") {
-        setLocationState("prompt");
-        setLocationAlert("Allow location to improve nearby address suggestions.");
+        setLocationState("prompt")
+        setLocationAlert(
+          "Allow location to improve nearby address suggestions.",
+        )
       } else {
-        setLocationState("unsupported");
-        setLocationAlert("Location permission status is unavailable here. Use my location to try the browser geolocation API directly.");
+        setLocationState("unsupported")
+        setLocationAlert(
+          "Location permission status is unavailable here. Use my location to try the browser geolocation API directly.",
+        )
       }
 
-      if (!navigator.permissions || typeof navigator.permissions.query !== "function") {
-        return;
+      if (
+        !navigator.permissions ||
+        typeof navigator.permissions.query !== "function"
+      ) {
+        return
       }
 
       try {
-        permissionStatus = await navigator.permissions.query({ name: "geolocation" as PermissionName });
-        if (cancelled) return;
+        permissionStatus = await navigator.permissions.query({
+          name: "geolocation" as PermissionName,
+        })
+        if (cancelled) return
         permissionStatus.onchange = () => {
-          setLocationState(permissionStatus!.state);
+          setLocationState(permissionStatus!.state)
           if (permissionStatus!.state === "granted") {
-            setLocationAlert("");
-            void loadCurrentLocation();
-            return;
+            setLocationAlert("")
+            void loadCurrentLocation()
+            return
           }
 
           if (permissionStatus!.state === "denied") {
-            setLocationAlert(`Location access is denied for this site. ${safariLocationHelp}`);
-            return;
+            setLocationAlert(
+              `Location access is denied for this site. ${safariLocationHelp}`,
+            )
+            return
           }
 
-          setLocationAlert("Allow location to improve nearby address suggestions.");
-        };
+          setLocationAlert(
+            "Allow location to improve nearby address suggestions.",
+          )
+        }
       } catch {
         if (!cancelled) {
-          setLocationState("unsupported");
-          setLocationAlert("Location permission status is unavailable here. Use my location to try the browser geolocation API directly.");
+          setLocationState("unsupported")
+          setLocationAlert(
+            "Location permission status is unavailable here. Use my location to try the browser geolocation API directly.",
+          )
         }
       }
     }
 
     function handleReturnToPage() {
       if (document.visibilityState === "visible") {
-        void refreshLocationPermission();
+        void refreshLocationPermission()
       }
     }
 
-    void refreshLocationPermission();
-    window.addEventListener("focus", handleReturnToPage);
-    document.addEventListener("visibilitychange", handleReturnToPage);
+    void refreshLocationPermission()
+    window.addEventListener("focus", handleReturnToPage)
+    document.addEventListener("visibilitychange", handleReturnToPage)
 
     return () => {
-      cancelled = true;
-      if (permissionStatus) permissionStatus.onchange = null;
-      window.removeEventListener("focus", handleReturnToPage);
-      document.removeEventListener("visibilitychange", handleReturnToPage);
-    };
-  }, []);
+      cancelled = true
+      if (permissionStatus) permissionStatus.onchange = null
+      window.removeEventListener("focus", handleReturnToPage)
+      document.removeEventListener("visibilitychange", handleReturnToPage)
+    }
+  }, [])
 
   useEffect(() => {
-    const normalizedQuery = query.trim();
+    const normalizedQuery = query.trim()
 
     if (suppressSuggestionsUntilTyping || normalizedQuery.length < 3) {
-      setSuggestions([]);
-      setAutocompleteState("idle");
-      setAutocompleteMessage("");
-      return;
+      setSuggestions([])
+      setAutocompleteState("idle")
+      setAutocompleteMessage("")
+      return
     }
 
-    const controller = new AbortController();
-    setAutocompleteState("loading");
-    setAutocompleteMessage("");
+    const controller = new AbortController()
+    setAutocompleteState("loading")
+    setAutocompleteMessage("")
 
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const map = mapInstanceRef.current;
+          const map = mapInstanceRef.current
           const activeBias =
             locationBias ??
             (map
@@ -959,138 +1311,205 @@ export default function MapKitTestPage() {
                   centerLng: map.region.center.longitude ?? -105.7821,
                   latSpan: map.region.span.latitudeDelta ?? 0.2,
                   lngSpan: map.region.span.longitudeDelta ?? 0.2,
-                  countryCode: "US"
+                  countryCode: "US",
                 }
-              : undefined);
-          const results = await searchAddressSuggestions(normalizedQuery, controller.signal, activeBias);
-          setSuggestions(results);
-          setAutocompleteState("success");
-          setAutocompleteMessage(results.length === 0 ? "No matching addresses found." : "");
+              : undefined)
+          const results = await searchAddressSuggestions(
+            normalizedQuery,
+            controller.signal,
+            activeBias,
+          )
+          setSuggestions(results)
+          setAutocompleteState("success")
+          setAutocompleteMessage(
+            results.length === 0 ? "No matching addresses found." : "",
+          )
         } catch (error) {
-          if (error instanceof DOMException && error.name === "AbortError") return;
-          console.error("Autocomplete failed:", error);
-          setSuggestions([]);
-          setAutocompleteState("error");
-          setAutocompleteMessage(error instanceof Error ? error.message : "Autocomplete failed.");
+          if (error instanceof DOMException && error.name === "AbortError")
+            return
+          console.error("Autocomplete failed:", error)
+          setSuggestions([])
+          setAutocompleteState("error")
+          setAutocompleteMessage(
+            error instanceof Error ? error.message : "Autocomplete failed.",
+          )
         }
-      })();
-    }, 250);
+      })()
+    }, 250)
 
     return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [locationBias, query]);
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [locationBias, query])
 
-  function recenterMap(latitude: number, longitude: number, latDelta?: number, lngDelta?: number) {
-    const mapkitWindow = window as Window & { mapkit?: NonNullable<Window["mapkit"]> };
-    const map = mapInstanceRef.current;
+  function recenterMap(
+    latitude: number,
+    longitude: number,
+    latDelta?: number,
+    lngDelta?: number,
+  ) {
+    const mapkitWindow = window as Window & {
+      mapkit?: NonNullable<Window["mapkit"]>
+    }
+    const map = mapInstanceRef.current
     if (!mapkitWindow.mapkit || !map) {
-      throw new Error("Map is not ready yet.");
+      throw new Error("Map is not ready yet.")
     }
 
-    const span = map.region?.span;
+    const span = map.region?.span
     const region = new mapkitWindow.mapkit.CoordinateRegion(
       new mapkitWindow.mapkit.Coordinate(latitude, longitude),
-      new mapkitWindow.mapkit.CoordinateSpan(latDelta ?? span?.latitudeDelta ?? 0.01, lngDelta ?? span?.longitudeDelta ?? 0.01)
-    );
+      new mapkitWindow.mapkit.CoordinateSpan(
+        latDelta ?? span?.latitudeDelta ?? 0.01,
+        lngDelta ?? span?.longitudeDelta ?? 0.01,
+      ),
+    )
 
-    map.region = region;
+    map.region = region
   }
 
   function switchMapToSatelliteAfterSearch() {
     window.setTimeout(() => {
-      const mapkit = window.mapkit;
-      const map = mapInstanceRef.current;
-      if (!mapkit || !map) return;
+      const mapkit = window.mapkit
+      const map = mapInstanceRef.current
+      if (!mapkit || !map) return
 
       map.mapType =
-        (mapkit.Map as { MapTypes?: { Satellite?: typeof map.mapType } } | undefined)?.MapTypes?.Satellite ??
+        (
+          mapkit.Map as
+            { MapTypes?: { Satellite?: typeof map.mapType } } | undefined
+        )?.MapTypes?.Satellite ??
         mapkit.MapType?.Satellite ??
-        map.mapType;
-    }, 250);
+        map.mapType
+    }, 250)
   }
 
   useEffect(() => {
-    if (!mapReady || !currentLocation || selectedPlace || hasCenteredOnUserLocationRef.current) {
-      return;
+    if (
+      !mapReady ||
+      !currentLocation ||
+      selectedPlace ||
+      hasCenteredOnUserLocationRef.current
+    ) {
+      return
     }
 
-    recenterMap(currentLocation.latitude, currentLocation.longitude, 0.02, 0.02);
-    hasCenteredOnUserLocationRef.current = true;
-  }, [currentLocation, mapReady, selectedPlace]);
+    recenterMap(currentLocation.latitude, currentLocation.longitude, 0.02, 0.02)
+    hasCenteredOnUserLocationRef.current = true
+  }, [currentLocation, mapReady, selectedPlace])
 
   useEffect(() => {
-    if (!mapReady) return;
-    syncCurrentLocationAnnotation(currentLocation);
-  }, [currentLocation, mapReady]);
+    if (!mapReady) return
+    syncCurrentLocationAnnotation(currentLocation)
+  }, [currentLocation, mapReady])
 
   useEffect(() => {
-    if (!mapReady) return;
-    syncSelectedPlaceAnnotation(selectedPlace);
-  }, [currentLocation, mapReady, selectedPlace]);
+    if (!mapReady) return
+    syncSelectedPlaceAnnotation(selectedPlace)
+  }, [currentLocation, mapReady, selectedPlace])
 
   useEffect(() => {
-    if (!mapReady || !selectedPlace) return;
-    recenterMap(selectedPlace.latitude, selectedPlace.longitude, SEARCH_MAX_ZOOM_SPAN, SEARCH_MAX_ZOOM_SPAN);
-    switchMapToSatelliteAfterSearch();
-  }, [mapReady, selectedPlace]);
+    if (!mapReady || !selectedPlace) return
+    switchMapToSatelliteAfterSearch()
+
+    if (hasPersistedMapCamera || pendingMapCameraRestoreRef.current) return
+    recenterMap(
+      selectedPlace.latitude,
+      selectedPlace.longitude,
+      SEARCH_MAX_ZOOM_SPAN,
+      SEARCH_MAX_ZOOM_SPAN,
+    )
+  }, [hasPersistedMapCamera, mapReady, selectedPlace])
 
   useEffect(() => {
-    if (!mapReady || !mapRef.current || !mapInstanceRef.current) return;
+    if (!mapReady || !mapRef.current || !mapInstanceRef.current) return
 
     function handleMapTap(event: Record<string, unknown>) {
-      const pointOnPage = event.pointOnPage as DOMPoint | undefined;
-      if (!pointOnPage) return;
-      handlePointOnPage(pointOnPage);
+      const pointOnPage = event.pointOnPage as DOMPoint | undefined
+      if (!pointOnPage) return
+      handlePointOnPage(pointOnPage)
     }
 
-    const map = mapInstanceRef.current;
+    const map = mapInstanceRef.current
     if (superZoomActive) {
-      return;
+      return
     }
-    map.addEventListener("single-tap", handleMapTap);
+    map.addEventListener("single-tap", handleMapTap)
 
     return () => {
-      map.removeEventListener("single-tap", handleMapTap);
-    };
-  }, [mapReady, pendingModeDecisionPoint, pendingLineStart, measurementSegments, superZoomActive]);
+      map.removeEventListener("single-tap", handleMapTap)
+    }
+  }, [
+    mapReady,
+    pendingModeDecisionPoint,
+    pendingLineStart,
+    measurementSegments,
+    superZoomActive,
+  ])
 
   useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
+    const map = mapInstanceRef.current
+    if (!map) return
 
-    map.isScrollEnabled = !superZoomActive;
-    map.isZoomEnabled = !superZoomActive;
-    map.isRotationEnabled = !superZoomActive;
-    map.isPitchEnabled = !superZoomActive;
-  }, [superZoomActive]);
-
-  useEffect(() => {
-    if (!mapReady) return;
-    syncMeasurementVisuals();
-  }, [mapReady, measurementSegments, pendingLineStart, superZoomActive]);
+    map.isScrollEnabled = !superZoomActive
+    map.isZoomEnabled = !superZoomActive
+    map.isRotationEnabled = !superZoomActive
+    map.isPitchEnabled = !superZoomActive
+  }, [superZoomActive])
 
   useEffect(() => {
-    if (!currentProjectId || !projectHydrated) return;
-    void saveProjectSnapshot().catch(() => undefined);
-  }, [currentProjectId, measurementSegments, pendingLineStart, projectHydrated]);
+    if (!mapReady) return
+    syncMeasurementVisuals()
+  }, [mapReady, measurementSegments, pendingLineStart, superZoomActive])
 
-  async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const normalizedQuery = query.trim();
-    if (!normalizedQuery) {
-      setSearchState("error");
-      setSearchMessage("Address is required.");
-      return;
+  useEffect(() => {
+    if (
+      !currentProjectId ||
+      !projectHydrated ||
+      isProjectHydratingRef.current ||
+      measurementPointDragRef.current
+    )
+      return
+    const signature = measurementGeometrySignature(
+      measurementSegments,
+      pendingLineStart,
+    )
+    if (
+      lastPersistedGeometryRef.current?.projectId === currentProjectId &&
+      lastPersistedGeometryRef.current.signature === signature
+    ) {
+      return
     }
 
-    setSearchState("loading");
-    setSearchMessage("");
+    const projectEpoch = projectEpochRef.current
+    void saveProjectSnapshot({
+      targetProjectId: currentProjectId,
+      projectEpoch,
+    }).catch(() => undefined)
+  }, [
+    currentProjectId,
+    geometryCommitRevision,
+    measurementSegments,
+    pendingLineStart,
+    projectHydrated,
+  ])
+
+  async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const normalizedQuery = query.trim()
+    if (!normalizedQuery) {
+      setSearchState("error")
+      setSearchMessage("Address is required.")
+      return
+    }
+
+    setSearchState("loading")
+    setSearchMessage("")
 
     try {
-      const map = mapInstanceRef.current;
+      const map = mapInstanceRef.current
       const activeBias =
         locationBias ??
         (map
@@ -1099,73 +1518,93 @@ export default function MapKitTestPage() {
               centerLng: map.region.center.longitude ?? -105.7821,
               latSpan: map.region.span.latitudeDelta ?? 0.2,
               lngSpan: map.region.span.longitudeDelta ?? 0.2,
-              countryCode: "US"
+              countryCode: "US",
             }
-          : undefined);
-      const [bestMatch] = await lookupStreetAddressWithBias(normalizedQuery, activeBias);
-      if (!bestMatch || typeof bestMatch.latitude !== "number" || typeof bestMatch.longitude !== "number") {
-        setSearchState("error");
-        setSearchMessage("No address found.");
-        return;
+          : undefined)
+      const [bestMatch] = await lookupStreetAddressWithBias(
+        normalizedQuery,
+        activeBias,
+      )
+      if (
+        !bestMatch ||
+        typeof bestMatch.latitude !== "number" ||
+        typeof bestMatch.longitude !== "number"
+      ) {
+        setSearchState("error")
+        setSearchMessage("No address found.")
+        return
       }
 
-      const location = toProjectLocation(bestMatch);
-      resetSuperZoom();
+      const location = toProjectLocation(bestMatch)
+      prepareForAddressSelection()
       setSelectedPlace({
         latitude: bestMatch.latitude,
-        longitude: bestMatch.longitude
-      });
-      setQuery(location.formattedAddress);
+        longitude: bestMatch.longitude,
+      })
+      setQuery(location.formattedAddress)
       await saveProjectSnapshot({
         projectName: location.formattedAddress,
         location,
-        measurementSegments: []
-      });
-      setSuppressSuggestionsUntilTyping(true);
-      resetMeasurementSession();
-      setSuggestions([]);
-      setAutocompleteState("idle");
-      setAutocompleteMessage("");
-      setSearchState("idle");
-      setSearchMessage("");
+        measurementSegments: [],
+        pendingLineStart: null,
+        mapCamera: null,
+      })
+      setSuppressSuggestionsUntilTyping(true)
+      resetMeasurementSession()
+      setSuggestions([])
+      setAutocompleteState("idle")
+      setAutocompleteMessage("")
+      setSearchState("idle")
+      setSearchMessage("")
     } catch (error) {
-      console.error("Address lookup failed:", error);
-      setSearchState("error");
-      setSearchMessage(error instanceof Error ? error.message : "Address lookup failed.");
+      console.error("Address lookup failed:", error)
+      setSearchState("error")
+      setSearchMessage(
+        error instanceof Error ? error.message : "Address lookup failed.",
+      )
     }
   }
 
   async function handleSuggestionSelect(suggestion: AddressSuggestion) {
-    setQuery(suggestion.formattedAddress || [suggestion.title, suggestion.subtitle].filter(Boolean).join(", "));
-    setSuppressSuggestionsUntilTyping(true);
-    setSearchState("loading");
-    setSearchMessage("");
+    setQuery(
+      suggestion.formattedAddress ||
+        [suggestion.title, suggestion.subtitle].filter(Boolean).join(", "),
+    )
+    setSuppressSuggestionsUntilTyping(true)
+    setSearchState("loading")
+    setSearchMessage("")
 
     try {
-      if (typeof suggestion.latitude === "number" && typeof suggestion.longitude === "number" && !suggestion.mapkitResult) {
-        const location = toProjectLocation(suggestion);
-        resetSuperZoom();
+      if (
+        typeof suggestion.latitude === "number" &&
+        typeof suggestion.longitude === "number" &&
+        !suggestion.mapkitResult
+      ) {
+        const location = toProjectLocation(suggestion)
+        prepareForAddressSelection()
         setSelectedPlace({
           latitude: suggestion.latitude,
-          longitude: suggestion.longitude
-        });
-        setQuery(location.formattedAddress);
+          longitude: suggestion.longitude,
+        })
+        setQuery(location.formattedAddress)
         await saveProjectSnapshot({
           projectName: location.formattedAddress,
           location,
-          measurementSegments: []
-        });
-        setSuppressSuggestionsUntilTyping(true);
-        resetMeasurementSession();
-        setSuggestions([]);
-        setAutocompleteState("idle");
-        setAutocompleteMessage("");
-        setSearchState("idle");
-        setSearchMessage("");
-        return;
+          measurementSegments: [],
+          pendingLineStart: null,
+          mapCamera: null,
+        })
+        setSuppressSuggestionsUntilTyping(true)
+        resetMeasurementSession()
+        setSuggestions([])
+        setAutocompleteState("idle")
+        setAutocompleteMessage("")
+        setSearchState("idle")
+        setSearchMessage("")
+        return
       }
 
-      const map = mapInstanceRef.current;
+      const map = mapInstanceRef.current
       const activeBias =
         locationBias ??
         (map
@@ -1174,147 +1613,204 @@ export default function MapKitTestPage() {
               centerLng: map.region.center.longitude ?? -105.7821,
               latSpan: map.region.span.latitudeDelta ?? 0.2,
               lngSpan: map.region.span.longitudeDelta ?? 0.2,
-              countryCode: "US"
+              countryCode: "US",
             }
-          : undefined);
-      const bestMatch = await searchBestAddressMatch(suggestion, undefined, activeBias);
-      if (!bestMatch || typeof bestMatch.latitude !== "number" || typeof bestMatch.longitude !== "number") {
-        setSearchState("error");
-        setSearchMessage("No address found.");
-        return;
+          : undefined)
+      const bestMatch = await searchBestAddressMatch(
+        suggestion,
+        undefined,
+        activeBias,
+      )
+      if (
+        !bestMatch ||
+        typeof bestMatch.latitude !== "number" ||
+        typeof bestMatch.longitude !== "number"
+      ) {
+        setSearchState("error")
+        setSearchMessage("No address found.")
+        return
       }
 
-      const location = toProjectLocation(bestMatch);
-      resetSuperZoom();
+      const location = toProjectLocation(bestMatch)
+      prepareForAddressSelection()
       setSelectedPlace({
         latitude: bestMatch.latitude,
-        longitude: bestMatch.longitude
-      });
-      setQuery(location.formattedAddress);
+        longitude: bestMatch.longitude,
+      })
+      setQuery(location.formattedAddress)
       await saveProjectSnapshot({
         projectName: location.formattedAddress,
         location,
-        measurementSegments: []
-      });
-      setSuppressSuggestionsUntilTyping(true);
-      resetMeasurementSession();
-      setSuggestions([]);
-      setAutocompleteState("idle");
-      setAutocompleteMessage("");
-      setSearchState("idle");
-      setSearchMessage("");
+        measurementSegments: [],
+        pendingLineStart: null,
+        mapCamera: null,
+      })
+      setSuppressSuggestionsUntilTyping(true)
+      resetMeasurementSession()
+      setSuggestions([])
+      setAutocompleteState("idle")
+      setAutocompleteMessage("")
+      setSearchState("idle")
+      setSearchMessage("")
     } catch (error) {
-      console.error("Suggestion lookup failed:", error);
-      setSearchState("error");
-      setSearchMessage(error instanceof Error ? error.message : "Address lookup failed.");
+      console.error("Suggestion lookup failed:", error)
+      setSearchState("error")
+      setSearchMessage(
+        error instanceof Error ? error.message : "Address lookup failed.",
+      )
     }
   }
 
-  function handleSuperZoomPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!superZoomActive) return;
+  function handleSuperZoomPointerDown(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
+    if (!superZoomActive) return
 
-    event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.setPointerCapture(event.pointerId)
     superZoomDragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       originX: superZoomOffsetX,
       originY: superZoomOffsetY,
-      dragging: false
-    };
+      dragging: false,
+    }
   }
 
-  function handleSuperZoomPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = superZoomDragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId || !superZoomActive) return;
+  function handleSuperZoomPointerMove(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
+    const drag = superZoomDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId || !superZoomActive) return
 
-    const deltaX = event.clientX - drag.startX;
-    const deltaY = event.clientY - drag.startY;
+    const deltaX = event.clientX - drag.startX
+    const deltaY = event.clientY - drag.startY
     if (!drag.dragging && Math.hypot(deltaX, deltaY) > 4) {
-      drag.dragging = true;
+      drag.dragging = true
     }
 
-    if (!drag.dragging) return;
+    if (!drag.dragging) return
 
-    const clampedOffsets = clampSuperZoomOffsets(superZoomScale, drag.originX + deltaX, drag.originY + deltaY);
-    setSuperZoomOffsetX(clampedOffsets.x);
-    setSuperZoomOffsetY(clampedOffsets.y);
+    const viewport = getMapViewport()
+    if (!viewport) return
+    setPrecisionZoom((current) =>
+      clampPrecisionZoomTransform(
+        {
+          ...current,
+          offsetX: drag.originX + deltaX,
+          offsetY: drag.originY + deltaY,
+        },
+        viewport,
+      ),
+    )
+    setPointActionMenu(null)
   }
 
   function handleSuperZoomPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = superZoomDragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId || !superZoomActive) return;
+    const drag = superZoomDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId || !superZoomActive) return
 
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    superZoomDragRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId)
+    superZoomDragRef.current = null
 
-    if (drag.dragging) return;
+    if (drag.dragging) return
 
-    const pointOnPage = new DOMPoint(event.pageX, event.pageY);
-    const bounds = mapViewportRef.current?.getBoundingClientRect();
+    const pointOnPage = getMapPagePointFromVisualPagePoint({
+      x: event.pageX,
+      y: event.pageY,
+    })
+    if (!pointOnPage) return
+    const bounds = mapViewportRef.current?.getBoundingClientRect()
     handlePointOnPage(
       pointOnPage,
       bounds
         ? {
             x: event.clientX - bounds.left,
-            y: event.clientY - bounds.top
+            y: event.clientY - bounds.top,
           }
-        : null
-    );
+        : null,
+    )
   }
 
-  function handleSuperZoomPointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
+  function handleSuperZoomPointerCancel(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
     if (superZoomDragRef.current?.pointerId === event.pointerId) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-      superZoomDragRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId)
+      superZoomDragRef.current = null
     }
   }
 
-  function handleMeasurementPointPointerDown(event: ReactPointerEvent<HTMLButtonElement>, point: MeasurementPoint) {
-    event.stopPropagation();
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
+  function handleMeasurementPointPointerDown(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    point: MeasurementPoint,
+  ) {
+    event.stopPropagation()
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
     measurementPointDragRef.current = {
       pointerId: event.pointerId,
-      sourcePoint: point
-    };
+      sourcePoint: point,
+    }
   }
 
-  function handleMeasurementPointPointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
-    const drag = measurementPointDragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId || !superZoomActive) return;
+  function handleMeasurementPointPointerMove(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) {
+    const drag = measurementPointDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
 
-    event.stopPropagation();
-    event.preventDefault();
+    event.stopPropagation()
+    event.preventDefault()
 
-    const map = mapInstanceRef.current;
-    if (!map) return;
+    const map = mapInstanceRef.current
+    const pointOnPage = getMapPagePointFromVisualPagePoint({
+      x: event.pageX,
+      y: event.pageY,
+    })
+    if (!map || !pointOnPage) return
 
-    const coordinate = map.convertPointOnPageToCoordinate(new DOMPoint(event.pageX, event.pageY));
+    const coordinate = map.convertPointOnPageToCoordinate(pointOnPage)
+    const latitude = coordinate.latitude
+    const longitude = coordinate.longitude
+    if (
+      typeof latitude !== "number" ||
+      typeof longitude !== "number" ||
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude)
+    ) {
+      return
+    }
     const nextPoint = {
-      latitude: coordinate.latitude ?? drag.sourcePoint.latitude,
-      longitude: coordinate.longitude ?? drag.sourcePoint.longitude
-    };
-    updateMeasurementPointsMatching(drag.sourcePoint, nextPoint);
-    drag.sourcePoint = nextPoint;
+      latitude,
+      longitude,
+    }
+    updateMeasurementPointsMatching(drag.sourcePoint, nextPoint)
+    drag.sourcePoint = nextPoint
   }
 
-  function handleMeasurementPointPointerUp(event: ReactPointerEvent<HTMLButtonElement>) {
-    const drag = measurementPointDragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
+  function handleMeasurementPointPointerUp(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) {
+    const drag = measurementPointDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
 
-    event.stopPropagation();
-    event.preventDefault();
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    measurementPointDragRef.current = null;
+    event.stopPropagation()
+    event.preventDefault()
+    event.currentTarget.releasePointerCapture(event.pointerId)
+    measurementPointDragRef.current = null
+    setGeometryCommitRevision((current) => current + 1)
   }
 
-  function handleMeasurementPointPointerCancel(event: ReactPointerEvent<HTMLButtonElement>) {
+  function handleMeasurementPointPointerCancel(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) {
     if (measurementPointDragRef.current?.pointerId === event.pointerId) {
-      event.stopPropagation();
-      event.preventDefault();
-      event.currentTarget.releasePointerCapture(event.pointerId);
-      measurementPointDragRef.current = null;
+      event.stopPropagation()
+      event.preventDefault()
+      event.currentTarget.releasePointerCapture(event.pointerId)
+      measurementPointDragRef.current = null
+      setGeometryCommitRevision((current) => current + 1)
     }
   }
 
@@ -1323,7 +1819,7 @@ export default function MapKitTestPage() {
       style={{
         position: "fixed",
         inset: 0,
-        background: "#d9ddd8"
+        background: "#d9ddd8",
       }}
     >
       <form
@@ -1335,7 +1831,7 @@ export default function MapKitTestPage() {
           zIndex: 3,
           width: "min(420px, calc(100vw - 32px))",
           display: "grid",
-          gap: 8
+          gap: 8,
         }}
       >
         {locationAlert && !isLocationAlertDismissed ? (
@@ -1349,11 +1845,25 @@ export default function MapKitTestPage() {
               background: "rgba(255, 248, 235, 0.96)",
               border: "1px solid rgba(201, 111, 48, 0.25)",
               color: "#5f3b16",
-              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)"
+              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)",
             }}
           >
-            <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 600 }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  fontWeight: 600,
+                }}
+              >
                 <MapPin size={16} />
                 Location access
               </div>
@@ -1368,14 +1878,16 @@ export default function MapKitTestPage() {
                   cursor: "pointer",
                   fontSize: 18,
                   lineHeight: 1,
-                  padding: 0
+                  padding: 0,
                 }}
               >
                 ×
               </button>
             </div>
             <div style={{ fontSize: 14 }}>{locationAlert}</div>
-            {locationState === "prompt" || locationState === "error" || locationState === "idle" ? (
+            {locationState === "prompt" ||
+            locationState === "error" ||
+            locationState === "idle" ? (
               <button
                 type="button"
                 onClick={() => void loadCurrentLocation()}
@@ -1386,7 +1898,7 @@ export default function MapKitTestPage() {
                   background: "rgba(255,255,255,0.9)",
                   padding: "8px 10px",
                   color: "#5f3b16",
-                  cursor: "pointer"
+                  cursor: "pointer",
                 }}
               >
                 Use my location
@@ -1394,12 +1906,14 @@ export default function MapKitTestPage() {
             ) : null}
             {locationState === "granted" && locationBias ? (
               <div style={{ fontSize: 13, color: "#6d4a22" }}>
-                Using location near {locationBias.centerLat.toFixed(4)}, {locationBias.centerLng.toFixed(4)}.
+                Using location near {locationBias.centerLat.toFixed(4)},{" "}
+                {locationBias.centerLng.toFixed(4)}.
               </div>
             ) : null}
             {locationState === "denied" ? (
               <div style={{ fontSize: 13, color: "#6d4a22" }}>
-                Open Safari page settings for `localhost`, allow Location, then reload.
+                Open Safari page settings for `localhost`, allow Location, then
+                reload.
               </div>
             ) : null}
           </div>
@@ -1413,7 +1927,7 @@ export default function MapKitTestPage() {
             borderRadius: 18,
             background: "rgba(255, 255, 255, 0.92)",
             border: "1px solid rgba(31, 37, 34, 0.12)",
-            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
           }}
         >
           <Search size={18} color="#5f685f" />
@@ -1421,8 +1935,8 @@ export default function MapKitTestPage() {
             aria-label="Search address"
             value={query}
             onChange={(event) => {
-              setSuppressSuggestionsUntilTyping(false);
-              setQuery(event.target.value);
+              setSuppressSuggestionsUntilTyping(false)
+              setQuery(event.target.value)
             }}
             placeholder="Search street address"
             style={{
@@ -1431,7 +1945,7 @@ export default function MapKitTestPage() {
               outline: "none",
               background: "transparent",
               color: "#1f2522",
-              fontSize: 16
+              fontSize: 16,
             }}
           />
         </div>
@@ -1444,7 +1958,7 @@ export default function MapKitTestPage() {
               borderRadius: 18,
               background: "rgba(255, 255, 255, 0.96)",
               border: "1px solid rgba(31, 37, 34, 0.12)",
-              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
             }}
           >
             {suggestions.map((suggestion) => (
@@ -1459,11 +1973,16 @@ export default function MapKitTestPage() {
                   borderRadius: 12,
                   padding: "10px 12px",
                   color: "#1f2522",
-                  cursor: "pointer"
+                  cursor: "pointer",
                 }}
               >
-                {(suggestion.mapkitResult as { displayLines?: string[] } | undefined)?.displayLines?.join(", ") ||
-                  [suggestion.title, suggestion.subtitle].filter(Boolean).join(", ")}
+                {(
+                  suggestion.mapkitResult as
+                    { displayLines?: string[] } | undefined
+                )?.displayLines?.join(", ") ||
+                  [suggestion.title, suggestion.subtitle]
+                    .filter(Boolean)
+                    .join(", ")}
               </button>
             ))}
           </div>
@@ -1477,10 +1996,12 @@ export default function MapKitTestPage() {
               border: "1px solid rgba(31, 37, 34, 0.12)",
               color: autocompleteState === "error" ? "#b43f2d" : "#1f2522",
               fontSize: 14,
-              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)"
+              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)",
             }}
           >
-            {autocompleteState === "loading" ? "Searching suggestions..." : autocompleteMessage}
+            {autocompleteState === "loading"
+              ? "Searching suggestions..."
+              : autocompleteMessage}
           </div>
         ) : null}
         {locationState === "requesting" ? (
@@ -1492,7 +2013,7 @@ export default function MapKitTestPage() {
               border: "1px solid rgba(31, 37, 34, 0.12)",
               color: "#1f2522",
               fontSize: 14,
-              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)"
+              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)",
             }}
           >
             Requesting your location for better nearby address results...
@@ -1507,7 +2028,7 @@ export default function MapKitTestPage() {
               border: "1px solid rgba(31, 37, 34, 0.12)",
               color: searchState === "error" ? "#b43f2d" : "#1f2522",
               fontSize: 14,
-              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)"
+              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)",
             }}
           >
             {searchState === "loading" ? "Searching..." : searchMessage}
@@ -1521,7 +2042,7 @@ export default function MapKitTestPage() {
               border: "1px solid rgba(31, 37, 34, 0.12)",
               color: "#1f2522",
               fontSize: 14,
-              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)"
+              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)",
             }}
           >
             Searching...
@@ -1537,7 +2058,7 @@ export default function MapKitTestPage() {
           zIndex: 3,
           display: "grid",
           justifyItems: "center",
-          gap: 8
+          gap: 8,
         }}
       >
         <button
@@ -1552,7 +2073,7 @@ export default function MapKitTestPage() {
             fontSize: 13,
             fontWeight: 600,
             boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
-            cursor: "pointer"
+            cursor: "pointer",
           }}
         >
           Settings
@@ -1566,15 +2087,30 @@ export default function MapKitTestPage() {
               borderRadius: 16,
               background: "rgba(255, 255, 255, 0.96)",
               border: "1px solid rgba(31, 37, 34, 0.12)",
-              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
             }}
           >
-            <div style={{ padding: "2px 4px", fontSize: 12, fontWeight: 700, color: "#5f685f", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+            <div
+              style={{
+                padding: "2px 4px",
+                fontSize: 12,
+                fontWeight: 700,
+                color: "#5f685f",
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+              }}
+            >
               Super Zoom
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
-              {[1, 1.5, 2, 3, 5].map((scale) => {
-                const active = superZoomScale === scale;
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: 8,
+              }}
+            >
+              {PRECISION_ZOOM_LEVELS.map((scale) => {
+                const active = superZoomScale === scale
                 return (
                   <button
                     key={scale}
@@ -1586,12 +2122,12 @@ export default function MapKitTestPage() {
                       padding: "10px 12px",
                       background: active ? "#1f2522" : "rgba(31, 37, 34, 0.08)",
                       color: active ? "#fff" : "#1f2522",
-                      cursor: "pointer"
+                      cursor: "pointer",
                     }}
                   >
                     {scale}x
                   </button>
-                );
+                )
               })}
             </div>
             <button
@@ -1603,7 +2139,7 @@ export default function MapKitTestPage() {
                 padding: "10px 12px",
                 background: "rgba(31, 37, 34, 0.08)",
                 color: "#1f2522",
-                cursor: "pointer"
+                cursor: "pointer",
               }}
             >
               Projects
@@ -1617,7 +2153,7 @@ export default function MapKitTestPage() {
                 padding: "10px 12px",
                 background: "rgba(31, 37, 34, 0.08)",
                 color: "#1f2522",
-                cursor: "pointer"
+                cursor: "pointer",
               }}
             >
               Reset View
@@ -1633,7 +2169,7 @@ export default function MapKitTestPage() {
               color: "#fff",
               fontSize: 12,
               fontWeight: 700,
-              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
             }}
           >
             Super Zoom {superZoomScale}x
@@ -1650,7 +2186,7 @@ export default function MapKitTestPage() {
                 : pendingModeDecisionAnchor.x + 20,
             top: Math.min(
               Math.max(pendingModeDecisionAnchor.y - 44, 12),
-              window.innerHeight - 108
+              window.innerHeight - 108,
             ),
             zIndex: 3,
             display: "grid",
@@ -1660,7 +2196,7 @@ export default function MapKitTestPage() {
             borderRadius: 16,
             background: "rgba(255, 255, 255, 0.97)",
             border: "1px solid rgba(31, 37, 34, 0.12)",
-            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
           }}
         >
           <button
@@ -1672,7 +2208,7 @@ export default function MapKitTestPage() {
               padding: "10px 12px",
               background: "#1f2522",
               color: "#fff",
-              cursor: "pointer"
+              cursor: "pointer",
             }}
           >
             Continue
@@ -1686,7 +2222,7 @@ export default function MapKitTestPage() {
               padding: "10px 12px",
               background: "rgba(31, 37, 34, 0.08)",
               color: "#1f2522",
-              cursor: "pointer"
+              cursor: "pointer",
             }}
           >
             Start New
@@ -1703,7 +2239,7 @@ export default function MapKitTestPage() {
                 : pointActionMenu.anchor.x + 20,
             top: Math.min(
               Math.max(pointActionMenu.anchor.y - 44, 12),
-              window.innerHeight - 108
+              window.innerHeight - 108,
             ),
             zIndex: 3,
             display: "grid",
@@ -1713,7 +2249,7 @@ export default function MapKitTestPage() {
             borderRadius: 16,
             background: "rgba(255, 255, 255, 0.97)",
             border: "1px solid rgba(31, 37, 34, 0.12)",
-            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
+            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
           }}
         >
           <button
@@ -1725,7 +2261,7 @@ export default function MapKitTestPage() {
               padding: "10px 12px",
               background: "#1f2522",
               color: "#fff",
-              cursor: "pointer"
+              cursor: "pointer",
             }}
           >
             Tie in
@@ -1739,7 +2275,7 @@ export default function MapKitTestPage() {
               padding: "10px 12px",
               background: "rgba(31, 37, 34, 0.08)",
               color: "#1f2522",
-              cursor: "pointer"
+              cursor: "pointer",
             }}
           >
             Delete
@@ -1752,16 +2288,17 @@ export default function MapKitTestPage() {
           position: "absolute",
           inset: 0,
           zIndex: 0,
-          overflow: "hidden"
+          overflow: "hidden",
         }}
       >
         <div
           style={{
             position: "absolute",
             inset: 0,
+            zIndex: 0,
             transform: `translate(${superZoomOffsetX}px, ${superZoomOffsetY}px) scale(${superZoomScale})`,
             transformOrigin: "top left",
-            willChange: superZoomActive ? "transform" : undefined
+            willChange: superZoomActive ? "transform" : undefined,
           }}
         >
           <div
@@ -1769,69 +2306,98 @@ export default function MapKitTestPage() {
             style={{
               position: "absolute",
               inset: 0,
-              zIndex: 0
+              zIndex: 0,
             }}
           />
-          {(measurementSegments.length > 0 || pendingLineStart) ? (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                zIndex: 2,
-                pointerEvents: "none"
-              }}
+        </div>
+        {measurementSegments.length > 0 || pendingLineStart ? (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 2,
+              pointerEvents: "none",
+            }}
+          >
+            <svg
+              width="100%"
+              height="100%"
+              style={{ position: "absolute", inset: 0, overflow: "visible" }}
             >
-              <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, overflow: "visible" }}>
-                {projectedMeasurementOverlay.segments.map((segment) => (
+              {projectedMeasurementOverlay.segments.map((segment) => {
+                const start = baseViewportPointToVisualViewportPoint(
+                  { x: segment.startX, y: segment.startY },
+                  precisionZoom,
+                )
+                const end = baseViewportPointToVisualViewportPoint(
+                  { x: segment.endX, y: segment.endY },
+                  precisionZoom,
+                )
+                const dx = end.x - start.x
+                const dy = end.y - start.y
+                const length = Math.hypot(dx, dy) || 1
+                const labelX = (start.x + end.x) / 2 + (-dy / length) * 34
+                const labelY = (start.y + end.y) / 2 + (dx / length) * 34
+
+                return (
                   <g key={segment.id}>
                     <line
-                      x1={segment.startX}
-                      y1={segment.startY}
-                      x2={segment.endX}
-                      y2={segment.endY}
+                      x1={start.x}
+                      y1={start.y}
+                      x2={end.x}
+                      y2={end.y}
                       stroke="#e0b93b"
-                      strokeWidth={segmentStrokeWidth}
+                      strokeWidth={3}
                       strokeLinecap="round"
-                      strokeDasharray={segmentDash}
+                      strokeDasharray="6 6"
                     />
-                    <g transform={`translate(${segment.labelX} ${segment.labelY})`}>
+                    <g transform={`translate(${labelX} ${labelY})`}>
                       <rect
-                        x={-labelOffsetX}
-                        y={-labelOffsetY}
-                        width={labelWidth}
-                        height={labelHeight}
-                        rx={labelRadius}
+                        x={-24}
+                        y={-10}
+                        width={48}
+                        height={20}
+                        rx={10}
                         fill="rgba(31, 37, 34, 0.82)"
                       />
                       <text
                         x={0}
-                        y={3.5 * overlayVisualScale}
+                        y={3.5}
                         fill="#fff"
                         textAnchor="middle"
-                        fontSize={labelFontSize}
+                        fontSize={10}
                         fontWeight={700}
                       >
                         {segment.label}
                       </text>
                     </g>
                   </g>
-                ))}
-              </svg>
-              {projectedMeasurementOverlay.points.map((point) => (
+                )
+              })}
+            </svg>
+            {projectedMeasurementOverlay.points.map((point) => {
+              const visualPoint = baseViewportPointToVisualViewportPoint(
+                { x: point.x, y: point.y },
+                precisionZoom,
+              )
+
+              return (
                 <button
                   key={`${point.key}:${point.tone}`}
                   type="button"
-                  onPointerDown={(event) => handleMeasurementPointPointerDown(event, point)}
+                  onPointerDown={(event) =>
+                    handleMeasurementPointPointerDown(event, point)
+                  }
                   onPointerMove={handleMeasurementPointPointerMove}
                   onPointerUp={handleMeasurementPointPointerUp}
                   onPointerCancel={handleMeasurementPointPointerCancel}
                   onClick={() => openPointActionMenu(point)}
                   style={{
                     position: "absolute",
-                    left: point.x,
-                    top: point.y,
-                    width: pointButtonSize,
-                    height: pointButtonSize,
+                    left: visualPoint.x,
+                    top: visualPoint.y,
+                    width: 28,
+                    height: 28,
                     transform: "translate(-50%, -50%)",
                     borderRadius: 999,
                     border: 0,
@@ -1841,28 +2407,30 @@ export default function MapKitTestPage() {
                     pointerEvents: "auto",
                     touchAction: "none",
                     display: "grid",
-                    placeItems: "center"
+                    placeItems: "center",
                   }}
                   aria-label="Move measurement point"
                 >
                   <span
-                  style={{
+                    style={{
                       display: "block",
-                      width: pointDotSize,
-                      height: pointDotSize,
+                      width: 10,
+                      height: 10,
                       borderRadius: 999,
-                      border: point.tone === "pending"
-                        ? `${pointDotBorderWidth}px solid #1f2522`
-                        : `${pointDotBorderWidth}px solid rgba(255,255,255,0.95)`,
-                      background: point.tone === "pending" ? "#ffffff" : "#1f2522",
-                      boxShadow: pointShadow
+                      border:
+                        point.tone === "pending"
+                          ? "2px solid #1f2522"
+                          : "2px solid rgba(255,255,255,0.95)",
+                      background:
+                        point.tone === "pending" ? "#ffffff" : "#1f2522",
+                      boxShadow: "0 6px 18px rgba(20, 24, 22, 0.22)",
                     }}
                   />
                 </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
+              )
+            })}
+          </div>
+        ) : null}
         {superZoomActive ? (
           <div
             onPointerDown={handleSuperZoomPointerDown}
@@ -1874,11 +2442,11 @@ export default function MapKitTestPage() {
               inset: 0,
               zIndex: 1,
               touchAction: "none",
-              cursor: superZoomDragRef.current?.dragging ? "grabbing" : "grab"
+              cursor: superZoomDragRef.current?.dragging ? "grabbing" : "grab",
             }}
           />
         ) : null}
       </div>
     </main>
-  );
+  )
 }
