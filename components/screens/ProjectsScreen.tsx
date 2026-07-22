@@ -124,7 +124,7 @@ export function ProjectsScreen() {
       {!isLoading && filtered.length === 0 ? (
         <EmptyState
           title="No saved projects yet"
-          description="Create your first roof measurement project from the home screen. Imported projects also appear here."
+          description="Search an address from the measuring screen to create a saved local project. Imported projects also appear here."
           actionLabel="Start New Project"
           onAction={() => router.push("/")}
         />
@@ -151,7 +151,7 @@ export function ProjectsScreen() {
                 <span>{totals.planeCount} roof planes</span>
               </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <Button onClick={() => router.push("/mapkit-test")}>
+                <Button onClick={() => router.push(`/?projectId=${project.id}`)}>
                   <FolderOpen size={18} /> Open
                 </Button>
                 <Button variant="secondary" onClick={() => handleDuplicateProject(project.id)}>

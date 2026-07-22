@@ -2,14 +2,18 @@
 
 import { MapPin, Search } from "lucide-react";
 import { FormEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   loadMapKit,
   lookupStreetAddressWithBias,
   searchAddressSuggestions,
   searchBestAddressMatch
 } from "@/lib/mapkit/client";
+import { db } from "@/lib/persistence/db";
+import { createEmptyProject } from "@/lib/projects/project-factory";
 import { haversineDistanceFeet } from "@/lib/measurement/geometry";
 import { AddressSuggestion } from "@/types/mapkit";
+import { Project, PropertyLocation } from "@/types/models";
 
 type LocationPermission = PermissionState | "unsupported";
 const LOCATION_ALERT_DISMISSED_KEY = "roofmeasure.mapkit-test.location-alert-dismissed";
@@ -23,6 +27,75 @@ type ProjectedMeasurementPoint = MeasurementPoint & {
   y: number;
   tone: "solid" | "pending";
 };
+
+function toProjectLocation(address: Pick<AddressSuggestion, "title" | "subtitle" | "formattedAddress" | "latitude" | "longitude">): PropertyLocation {
+  return {
+    formattedAddress: address.formattedAddress || [address.title, address.subtitle].filter(Boolean).join(", "),
+    latitude: address.latitude ?? 0,
+    longitude: address.longitude ?? 0
+  };
+}
+
+function toProjectMeasurementData(measurementSegments: MeasurementSegment[]) {
+  const now = new Date().toISOString();
+  const points = new Map<string, { id: string; lat: number; lng: number }>();
+
+  function ensurePoint(point: MeasurementPoint) {
+    const key = `${point.latitude.toFixed(7)}:${point.longitude.toFixed(7)}`;
+    if (!points.has(key)) {
+      points.set(key, {
+        id: key,
+        lat: point.latitude,
+        lng: point.longitude
+      });
+    }
+    return points.get(key)!;
+  }
+
+  return {
+    points: Array.from(points.values()),
+    segments: measurementSegments.map((segment) => {
+      const startPoint = ensurePoint(segment.start);
+      const endPoint = ensurePoint(segment.end);
+      return {
+        id: segment.id,
+        type: "eave" as const,
+        startPointId: startPoint.id,
+        endPointId: endPoint.id,
+        lengthFeet: haversineDistanceFeet(
+          { lat: segment.start.latitude, lng: segment.start.longitude },
+          { lat: segment.end.latitude, lng: segment.end.longitude }
+        ),
+        groupId: "mapkit-test",
+        createdAt: now,
+        updatedAt: now
+      };
+    })
+  };
+}
+
+function fromProjectMeasurementData(project: Project): MeasurementSegment[] {
+  const pointsById = new Map(project.points.map((point) => [point.id, point]));
+
+  return project.segments
+    .map((segment) => {
+      const startPoint = pointsById.get(segment.startPointId);
+      const endPoint = pointsById.get(segment.endPointId);
+      if (!startPoint || !endPoint) return null;
+      return {
+        id: segment.id,
+        start: {
+          latitude: startPoint.lat,
+          longitude: startPoint.lng
+        },
+        end: {
+          latitude: endPoint.lat,
+          longitude: endPoint.lng
+        }
+      };
+    })
+    .filter((segment): segment is MeasurementSegment => Boolean(segment));
+}
 
 async function getLocationPermission(): Promise<LocationPermission> {
   if (typeof navigator === "undefined" || !navigator.permissions || typeof navigator.permissions.query !== "function") {
@@ -48,9 +121,13 @@ async function requestCurrentLocation() {
 }
 
 export default function MapKitTestPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const mapViewportRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<InstanceType<NonNullable<NonNullable<Window["mapkit"]>["Map"]>> | null>(null);
+  const currentProjectIdRef = useRef<string | null>(null);
+  const hydratedProjectIdRef = useRef<string | null>(null);
   const superZoomDragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -93,6 +170,7 @@ export default function MapKitTestPage() {
   } | null>(null);
   const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [measurementSegments, setMeasurementSegments] = useState<MeasurementSegment[]>([]);
   const [pendingLineStart, setPendingLineStart] = useState<MeasurementPoint | null>(null);
   const [pendingModeDecisionPoint, setPendingModeDecisionPoint] = useState<MeasurementPoint | null>(null);
@@ -117,9 +195,68 @@ export default function MapKitTestPage() {
   }, [locationBias]);
 
   useEffect(() => {
+    currentProjectIdRef.current = currentProjectId;
+  }, [currentProjectId]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     setIsLocationAlertDismissed(window.localStorage.getItem(LOCATION_ALERT_DISMISSED_KEY) === "1");
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const projectId = searchParams.get("projectId");
+
+    async function hydrateProject() {
+      if (!projectId) {
+        hydratedProjectIdRef.current = null;
+        currentProjectIdRef.current = null;
+        setCurrentProjectId(null);
+        setQuery("");
+        setSelectedPlace(null);
+        setMeasurementSegments([]);
+        setPendingLineStart(null);
+        setPendingModeDecisionPoint(null);
+        setPendingModeDecisionAnchor(null);
+        setSuppressSuggestionsUntilTyping(false);
+        resetSuperZoom();
+        return;
+      }
+
+      if (hydratedProjectIdRef.current === projectId) {
+        setCurrentProjectId(projectId);
+        return;
+      }
+
+      const project = await db.getProject(projectId);
+      if (!project || cancelled) return;
+
+      hydratedProjectIdRef.current = projectId;
+      currentProjectIdRef.current = project.id;
+      setCurrentProjectId(project.id);
+      setQuery(project.location?.formattedAddress ?? project.name);
+      setSuppressSuggestionsUntilTyping(Boolean(project.location));
+      setMeasurementSegments(fromProjectMeasurementData(project));
+      setPendingLineStart(null);
+      setPendingModeDecisionPoint(null);
+      setPendingModeDecisionAnchor(null);
+      resetSuperZoom();
+      setSelectedPlace(
+        project.location
+          ? {
+              latitude: project.location.latitude,
+              longitude: project.location.longitude
+            }
+          : null
+      );
+    }
+
+    void hydrateProject();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
 
   function dismissLocationAlert() {
     setIsLocationAlertDismissed(true);
@@ -201,6 +338,38 @@ export default function MapKitTestPage() {
         end
       }
     ]);
+  }
+
+  async function saveProjectSnapshot(options?: {
+    projectName?: string;
+    location?: PropertyLocation | null;
+  }) {
+    const geometry = toProjectMeasurementData(measurementSegments);
+    const existingProject =
+      currentProjectIdRef.current ? await db.getProject(currentProjectIdRef.current) : undefined;
+    const projectName =
+      options?.projectName ??
+      existingProject?.name ??
+      (query.trim() || options?.location?.formattedAddress || "Untitled Project");
+    const baseProject = existingProject ?? createEmptyProject(projectName);
+    const savedProject = await db.saveProject({
+      ...baseProject,
+      name: projectName,
+      location: options?.location === undefined ? baseProject.location : options.location ?? undefined,
+      points: geometry.points,
+      segments: geometry.segments,
+      groups: [],
+      planes: [],
+      lastOpenedAt: new Date().toISOString()
+    });
+
+    if (currentProjectIdRef.current !== savedProject.id) {
+      currentProjectIdRef.current = savedProject.id;
+      setCurrentProjectId(savedProject.id);
+      router.replace(`/?projectId=${savedProject.id}`);
+    }
+
+    return savedProject;
   }
 
   function pointKey(point: MeasurementPoint) {
@@ -311,6 +480,22 @@ export default function MapKitTestPage() {
   }
 
   const projectedMeasurementOverlay = useMemo(() => {
+    if (typeof window === "undefined") {
+      return {
+        segments: [] as Array<{
+          id: string;
+          startX: number;
+          startY: number;
+          endX: number;
+          endY: number;
+          labelX: number;
+          labelY: number;
+          label: string;
+        }>,
+        points: [] as ProjectedMeasurementPoint[]
+      };
+    }
+
     const mapkit = window.mapkit;
     const map = mapInstanceRef.current;
     const bounds = mapViewportRef.current?.getBoundingClientRect();
@@ -762,6 +947,11 @@ export default function MapKitTestPage() {
   }, [currentLocation, mapReady, selectedPlace]);
 
   useEffect(() => {
+    if (!mapReady || !selectedPlace) return;
+    recenterMap(selectedPlace.latitude, selectedPlace.longitude, SEARCH_MAX_ZOOM_SPAN, SEARCH_MAX_ZOOM_SPAN);
+  }, [mapReady, selectedPlace]);
+
+  useEffect(() => {
     if (!mapReady || !mapRef.current || !mapInstanceRef.current) return;
 
     function handleMapTap(event: Record<string, unknown>) {
@@ -796,6 +986,11 @@ export default function MapKitTestPage() {
     syncMeasurementVisuals();
   }, [mapReady, measurementSegments, pendingLineStart, superZoomActive]);
 
+  useEffect(() => {
+    if (!currentProjectId) return;
+    void saveProjectSnapshot().catch(() => undefined);
+  }, [currentProjectId, measurementSegments]);
+
   async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -829,12 +1024,17 @@ export default function MapKitTestPage() {
         return;
       }
 
+      const location = toProjectLocation(bestMatch);
       resetSuperZoom();
-      recenterMap(bestMatch.latitude, bestMatch.longitude, SEARCH_MAX_ZOOM_SPAN, SEARCH_MAX_ZOOM_SPAN);
       switchMapToSatelliteAfterSearch();
       setSelectedPlace({
         latitude: bestMatch.latitude,
         longitude: bestMatch.longitude
+      });
+      setQuery(location.formattedAddress);
+      await saveProjectSnapshot({
+        projectName: location.formattedAddress,
+        location
       });
       setSuppressSuggestionsUntilTyping(true);
       resetMeasurementSession();
@@ -858,12 +1058,17 @@ export default function MapKitTestPage() {
 
     try {
       if (typeof suggestion.latitude === "number" && typeof suggestion.longitude === "number" && !suggestion.mapkitResult) {
+        const location = toProjectLocation(suggestion);
         resetSuperZoom();
-        recenterMap(suggestion.latitude, suggestion.longitude, SEARCH_MAX_ZOOM_SPAN, SEARCH_MAX_ZOOM_SPAN);
         switchMapToSatelliteAfterSearch();
         setSelectedPlace({
           latitude: suggestion.latitude,
           longitude: suggestion.longitude
+        });
+        setQuery(location.formattedAddress);
+        await saveProjectSnapshot({
+          projectName: location.formattedAddress,
+          location
         });
         setSuppressSuggestionsUntilTyping(true);
         resetMeasurementSession();
@@ -894,12 +1099,17 @@ export default function MapKitTestPage() {
         return;
       }
 
+      const location = toProjectLocation(bestMatch);
       resetSuperZoom();
-      recenterMap(bestMatch.latitude, bestMatch.longitude, SEARCH_MAX_ZOOM_SPAN, SEARCH_MAX_ZOOM_SPAN);
       switchMapToSatelliteAfterSearch();
       setSelectedPlace({
         latitude: bestMatch.latitude,
         longitude: bestMatch.longitude
+      });
+      setQuery(location.formattedAddress);
+      await saveProjectSnapshot({
+        projectName: location.formattedAddress,
+        location
       });
       setSuppressSuggestionsUntilTyping(true);
       resetMeasurementSession();

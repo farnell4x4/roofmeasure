@@ -1,10 +1,13 @@
 "use client";
 
-import { MoonStar, Ruler, SunMedium } from "lucide-react";
+import { FolderOpen, MoonStar, Ruler, SunMedium } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useAppPreferences } from "@/hooks/useAppPreferences";
 
 export function SettingsScreen() {
+  const router = useRouter();
   const { preferences, setPreferences } = useAppPreferences();
 
   return (
@@ -58,6 +61,10 @@ export function SettingsScreen() {
             <option value="dark">Dark</option>
           </select>
         </label>
+
+        <Button variant="secondary" onClick={() => router.push("/projects")}>
+          <FolderOpen size={18} /> Projects
+        </Button>
       </Card>
     </main>
   );
