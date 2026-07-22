@@ -42,6 +42,7 @@ import { appendPersistenceDebugNote } from "@/lib/debug/persistence-debug"
 import { db } from "@/lib/persistence/db"
 import { createEmptyProject } from "@/lib/projects/project-factory"
 import { haversineDistanceFeet } from "@/lib/measurement/geometry"
+import { calculateProjectTotals } from "@/lib/measurement/calculations"
 import { detectRoofPlanes } from "@/lib/measurement/plane-detection"
 import { AddressSuggestion } from "@/types/mapkit"
 import {
@@ -385,6 +386,7 @@ function MapKitTestPage() {
   const [segmentTypeMenu, setSegmentTypeMenu] =
     useState<SegmentTypeMenuState | null>(null)
   const [roofPlanes, setRoofPlanes] = useState<RoofPlane[]>([])
+  const [activeSinglePitch, setActiveSinglePitch] = useState("6/12")
   const [isMeasurementSettingsOpen, setIsMeasurementSettingsOpen] =
     useState(false)
   const [precisionZoom, setPrecisionZoom] = useState(DEFAULT_PRECISION_ZOOM)
@@ -421,6 +423,18 @@ function MapKitTestPage() {
       }))
       .filter((plane) => plane.points.length >= 3)
   }, [projectedMeasurementOverlay.points, roofPlanes])
+  const liveCalculations = useMemo(() => {
+    const project = createEmptyProject("Live calculation")
+    const geometry = toProjectMeasurementData(
+      measurementSegments,
+      pendingLineStart,
+    )
+    project.points = geometry.points
+    project.segments = geometry.segments
+    project.planes = roofPlanes
+    project.singlePitch = activeSinglePitch
+    return calculateProjectTotals(project)
+  }, [activeSinglePitch, measurementSegments, pendingLineStart, roofPlanes])
 
   const safariLocationHelp =
     'In Safari, open Website Settings for this page and change Location to "Allow", then reload this page.'
@@ -470,6 +484,7 @@ function MapKitTestPage() {
         lastPersistedGeometryRef.current = null
         lastPersistedMapCameraRef.current = null
         setCurrentProjectId(null)
+        setActiveSinglePitch("6/12")
         setQuery("")
         setSelectedPlace(null)
         setHasPersistedMapCamera(false)
@@ -630,6 +645,7 @@ function MapKitTestPage() {
         signature: mapCameraSignature(savedMapCamera),
       }
       setCurrentProjectId(project.id)
+      setActiveSinglePitch(project.singlePitch ?? "0/12")
       setQuery(project.location?.formattedAddress ?? project.name)
       setSuppressSuggestionsUntilTyping(Boolean(project.location))
       setHasPersistedMapCamera(Boolean(savedMapCamera))
@@ -3073,6 +3089,23 @@ function MapKitTestPage() {
               {option.label}
             </button>
           ))}
+        </div>
+      ) : null}
+      {liveCalculations.segmentCount > 0 ? (
+        <div
+          className="chip"
+          style={{
+            position: "absolute",
+            right: 14,
+            bottom: 14,
+            zIndex: 3,
+            background: "rgba(31, 37, 34, 0.88)",
+            color: "#fff",
+          }}
+        >
+          {liveCalculations.totalSlopeAreaSqFt > 0
+            ? `${Math.round(liveCalculations.totalSlopeAreaSqFt).toLocaleString()} sq ft`
+            : `${liveCalculations.totalSlopeAdjustedLength.toFixed(1)} ft adjusted`}
         </div>
       ) : null}
       <div

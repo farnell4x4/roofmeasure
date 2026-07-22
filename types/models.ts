@@ -120,6 +120,9 @@ export type AppPreferences = {
 
 export type ProjectCalculations = {
   totals: Record<MeasurementType, number>;
+  slopeAdjustedTotals: Record<MeasurementType, number>;
+  totalMeasuredLength: number;
+  totalSlopeAdjustedLength: number;
   totalPlanAreaSqFt: number;
   totalSlopeAreaSqFt: number;
   totalSquares: number;
