@@ -8,6 +8,7 @@ import {
 } from "@/lib/debug/persistence-debug";
 
 export function PersistenceDebugOverlay() {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- retained for the temporarily hidden debug trigger below.
   const [open, setOpen] = useState(false);
   // Keep the first client render identical to SSR. sessionStorage is only read
   // after React has hydrated this client component.
@@ -47,6 +48,9 @@ export function PersistenceDebugOverlay() {
 
   return (
     <div style={{ position: "fixed", top: 12, right: 12, zIndex: 10000 }}>
+      {/*
+        Temporarily hidden: keep this trigger and its toggle logic ready to
+        restore when the persistence debug overlay is needed again.
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
@@ -63,6 +67,7 @@ export function PersistenceDebugOverlay() {
       >
         Data Debug{entries.length ? ` (${entries.length})` : ""}
       </button>
+      */}
       {open ? (
         <section
           aria-label="Persistence debug notes"

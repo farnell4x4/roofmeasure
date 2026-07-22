@@ -2682,6 +2682,90 @@ function MapKitTestPage() {
             }}
           />
         </div>
+        <div style={{ display: "grid", justifyItems: "start", gap: 4 }}>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              width: "min(236px, 100%)",
+              padding: "7px 10px",
+              borderRadius: 14,
+              background: "rgba(255, 255, 255, 0.94)",
+              border: "1px solid rgba(31, 37, 34, 0.12)",
+              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)",
+              color: "#1f2522",
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            <span>Zoom {superZoomScale}x</span>
+            <input
+              aria-label="Super Zoom level"
+              type="range"
+              min="0"
+              max={PRECISION_ZOOM_LEVELS.length - 1}
+              step="1"
+              value={Math.max(
+                0,
+                PRECISION_ZOOM_LEVELS.findIndex(
+                  (scale) => scale === superZoomScale,
+                ),
+              )}
+              onChange={(event) => {
+                const scale = PRECISION_ZOOM_LEVELS[Number(event.target.value)]
+                if (scale !== undefined) setSuperZoomLevel(scale)
+              }}
+              style={{ flex: 1, minWidth: 0, accentColor: "#1f2522" }}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setIsMeasurementSettingsOpen((current) => !current)}
+            style={{
+              border: "1px solid rgba(31, 37, 34, 0.12)",
+              background: "rgba(255, 255, 255, 0.94)",
+              color: "#1f2522",
+              borderRadius: 999,
+              padding: "8px 12px",
+              fontSize: 13,
+              fontWeight: 600,
+              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)",
+              cursor: "pointer",
+            }}
+          >
+            Settings
+          </button>
+          {isMeasurementSettingsOpen ? (
+            <div
+              style={{
+                display: "grid",
+                gap: 8,
+                padding: 10,
+                width: "min(236px, 100%)",
+                borderRadius: 16,
+                background: "rgba(255, 255, 255, 0.96)",
+                border: "1px solid rgba(31, 37, 34, 0.12)",
+                boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => router.push("/projects")}
+                style={{
+                  border: 0,
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  background: "rgba(31, 37, 34, 0.08)",
+                  color: "#1f2522",
+                  cursor: "pointer",
+                }}
+              >
+                Projects
+              </button>
+            </div>
+          ) : null}
+        </div>
         {suggestions.length > 0 ? (
           <div
             style={{
@@ -2737,21 +2821,6 @@ function MapKitTestPage() {
               : autocompleteMessage}
           </div>
         ) : null}
-        {locationState === "requesting" ? (
-          <div
-            style={{
-              padding: "10px 12px",
-              borderRadius: 14,
-              background: "rgba(255, 255, 255, 0.92)",
-              border: "1px solid rgba(31, 37, 34, 0.12)",
-              color: "#1f2522",
-              fontSize: 14,
-              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)",
-            }}
-          >
-            Requesting your location for better nearby address results...
-          </div>
-        ) : null}
         {searchMessage ? (
           <div
             style={{
@@ -2782,133 +2851,6 @@ function MapKitTestPage() {
           </div>
         ) : null}
       </form>
-      <div
-        style={{
-          position: "absolute",
-          top: 16,
-          left: "50%",
-          transform: "translateX(-50%)",
-          zIndex: 3,
-          display: "grid",
-          justifyItems: "center",
-          gap: 8,
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => setIsMeasurementSettingsOpen((current) => !current)}
-          style={{
-            border: "1px solid rgba(31, 37, 34, 0.12)",
-            background: "rgba(255, 255, 255, 0.94)",
-            color: "#1f2522",
-            borderRadius: 999,
-            padding: "10px 14px",
-            fontSize: 13,
-            fontWeight: 600,
-            boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
-            cursor: "pointer",
-          }}
-        >
-          Settings
-        </button>
-        {isMeasurementSettingsOpen ? (
-          <div
-            style={{
-              display: "grid",
-              gap: 8,
-              padding: 10,
-              borderRadius: 16,
-              background: "rgba(255, 255, 255, 0.96)",
-              border: "1px solid rgba(31, 37, 34, 0.12)",
-              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
-            }}
-          >
-            <div
-              style={{
-                padding: "2px 4px",
-                fontSize: 12,
-                fontWeight: 700,
-                color: "#5f685f",
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-              }}
-            >
-              Super Zoom
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                gap: 8,
-              }}
-            >
-              {PRECISION_ZOOM_LEVELS.map((scale) => {
-                const active = superZoomScale === scale
-                return (
-                  <button
-                    key={scale}
-                    type="button"
-                    onClick={() => setSuperZoomLevel(scale)}
-                    style={{
-                      border: 0,
-                      borderRadius: 12,
-                      padding: "10px 12px",
-                      background: active ? "#1f2522" : "rgba(31, 37, 34, 0.08)",
-                      color: active ? "#fff" : "#1f2522",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {scale}x
-                  </button>
-                )
-              })}
-            </div>
-            <button
-              type="button"
-              onClick={() => router.push("/projects")}
-              style={{
-                border: 0,
-                borderRadius: 12,
-                padding: "10px 12px",
-                background: "rgba(31, 37, 34, 0.08)",
-                color: "#1f2522",
-                cursor: "pointer",
-              }}
-            >
-              Projects
-            </button>
-            <button
-              type="button"
-              onClick={resetSuperZoom}
-              style={{
-                border: 0,
-                borderRadius: 12,
-                padding: "10px 12px",
-                background: "rgba(31, 37, 34, 0.08)",
-                color: "#1f2522",
-                cursor: "pointer",
-              }}
-            >
-              Reset View
-            </button>
-          </div>
-        ) : null}
-        {superZoomActive ? (
-          <div
-            style={{
-              padding: "8px 12px",
-              borderRadius: 999,
-              background: "rgba(31, 37, 34, 0.88)",
-              color: "#fff",
-              fontSize: 12,
-              fontWeight: 700,
-              boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)",
-            }}
-          >
-            Super Zoom {superZoomScale}x
-          </div>
-        ) : null}
-      </div>
       {pendingModeDecisionPoint && pendingModeDecisionAnchor ? (
         <div
           style={{
