@@ -1447,13 +1447,18 @@ export default function MapKitTestPage() {
         <div
           style={{
             position: "absolute",
-            left: pendingModeDecisionAnchor.x,
-            top: pendingModeDecisionAnchor.y,
-            transform: "translate(-50%, 14px)",
+            left:
+              pendingModeDecisionAnchor.x > window.innerWidth - 176
+                ? pendingModeDecisionAnchor.x - 156
+                : pendingModeDecisionAnchor.x + 20,
+            top: Math.min(
+              Math.max(pendingModeDecisionAnchor.y - 44, 12),
+              window.innerHeight - 108
+            ),
             zIndex: 3,
             display: "grid",
             gap: 8,
-            width: 144,
+            width: 136,
             padding: 12,
             borderRadius: 16,
             background: "rgba(255, 255, 255, 0.97)",
@@ -1461,9 +1466,6 @@ export default function MapKitTestPage() {
             boxShadow: "0 14px 30px rgba(20, 24, 22, 0.16)"
           }}
         >
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#1f2522" }}>
-            Continue or start new?
-          </div>
           <button
             type="button"
             onClick={() => applyMeasurementModeChoice("continue")}
