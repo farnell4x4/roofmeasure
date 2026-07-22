@@ -2,7 +2,7 @@
 
 import { MapPin, Search } from "lucide-react";
 import { FormEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   loadMapKit,
   lookupStreetAddressWithBias,
@@ -142,13 +142,14 @@ async function requestCurrentLocation() {
 }
 
 export default function MapKitTestPage() {
+  const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const projectId = searchParams.get("projectId");
   const mapViewportRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<InstanceType<NonNullable<NonNullable<Window["mapkit"]>["Map"]>> | null>(null);
   const currentProjectIdRef = useRef<string | null>(null);
-  const hydratedProjectIdRef = useRef<string | null>(null);
   const superZoomDragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -192,6 +193,7 @@ export default function MapKitTestPage() {
   const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<{ latitude: number; longitude: number } | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [projectHydrated, setProjectHydrated] = useState(false);
   const [measurementSegments, setMeasurementSegments] = useState<MeasurementSegment[]>([]);
   const [pendingLineStart, setPendingLineStart] = useState<MeasurementPoint | null>(null);
   const [pendingModeDecisionPoint, setPendingModeDecisionPoint] = useState<MeasurementPoint | null>(null);
@@ -226,11 +228,9 @@ export default function MapKitTestPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const projectId = searchParams.get("projectId");
 
     async function hydrateProject() {
       if (!projectId) {
-        hydratedProjectIdRef.current = null;
         currentProjectIdRef.current = null;
         setCurrentProjectId(null);
         setQuery("");
@@ -241,19 +241,15 @@ export default function MapKitTestPage() {
         setPendingModeDecisionAnchor(null);
         setSuppressSuggestionsUntilTyping(false);
         resetSuperZoom();
+        setProjectHydrated(true);
         return;
       }
 
-      if (hydratedProjectIdRef.current === projectId) {
-        setCurrentProjectId(projectId);
-        return;
-      }
-
+      setProjectHydrated(false);
       const project = await db.getProject(projectId);
       if (!project || cancelled) return;
       const measurementState = fromProjectMeasurementData(project);
 
-      hydratedProjectIdRef.current = projectId;
       currentProjectIdRef.current = project.id;
       setCurrentProjectId(project.id);
       setQuery(project.location?.formattedAddress ?? project.name);
@@ -271,6 +267,7 @@ export default function MapKitTestPage() {
             }
           : null
       );
+      setProjectHydrated(true);
     }
 
     void hydrateProject();
@@ -278,7 +275,7 @@ export default function MapKitTestPage() {
     return () => {
       cancelled = true;
     };
-  }, [searchParams]);
+  }, [pathname, projectId]);
 
   function dismissLocationAlert() {
     setIsLocationAlertDismissed(true);
@@ -1015,9 +1012,9 @@ export default function MapKitTestPage() {
   }, [mapReady, measurementSegments, pendingLineStart, superZoomActive]);
 
   useEffect(() => {
-    if (!currentProjectId) return;
+    if (!currentProjectId || !projectHydrated) return;
     void saveProjectSnapshot().catch(() => undefined);
-  }, [currentProjectId, measurementSegments, pendingLineStart]);
+  }, [currentProjectId, measurementSegments, pendingLineStart, projectHydrated]);
 
   async function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
