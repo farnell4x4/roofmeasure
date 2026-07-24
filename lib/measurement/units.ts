@@ -32,3 +32,7 @@ export function formatArea(squareFeet: number, unitSystem: UnitSystem) {
   }
   return `${squareFeet.toFixed(1)} sq ft`;
 }
+
+export function formatRoofingSquares(squares: number) {
+  return `${Number(squares.toFixed(2))}sq`;
+}

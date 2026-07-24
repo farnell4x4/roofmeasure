@@ -46,6 +46,7 @@ import { createEmptyProject } from "@/lib/projects/project-factory"
 import { FirstRunOnboarding } from "@/components/app/FirstRunOnboarding"
 import { haversineDistanceFeet } from "@/lib/measurement/geometry"
 import { roundMeasurement } from "@/lib/measurement/rounding"
+import { formatRoofingSquares } from "@/lib/measurement/units"
 import {
   calculateProjectTotals,
   getProjectCalculationBreakdown,
@@ -469,6 +470,20 @@ function MapKitTestPage() {
       activeSinglePitch,
     )
     return calculateProjectTotals(project)
+  }, [activeSinglePitch, measurementSegments, pendingLineStart, roofPlanes])
+  const liveRoofPlaneSquaresById = useMemo(() => {
+    const project = createLiveCalculationProject(
+      measurementSegments,
+      pendingLineStart,
+      roofPlanes,
+      activeSinglePitch,
+    )
+    return new Map(
+      getProjectCalculationBreakdown(project).planes.map((plane) => [
+        plane.id,
+        formatRoofingSquares(plane.slopeAreaSqFt / 100),
+      ]),
+    )
   }, [activeSinglePitch, measurementSegments, pendingLineStart, roofPlanes])
   const untypedSegmentCount = useMemo(
     () => measurementSegments.filter((segment) => !segment.type).length,
@@ -3343,6 +3358,22 @@ function MapKitTestPage() {
                     >
                       {plane.pitch?.replace(/12$/, "") ?? "?/12"}
                     </text>
+                    <text
+                      x={labelCenter.x}
+                      y={labelCenter.y + 13}
+                      fill="#fff"
+                      stroke="#000"
+                      strokeWidth={3}
+                      paintOrder="stroke"
+                      strokeLinejoin="round"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={10}
+                      fontWeight={800}
+                      style={{ pointerEvents: "none" }}
+                    >
+                      {liveRoofPlaneSquaresById.get(plane.id) ?? "0sq"}
+                    </text>
                   </g>
                 )
               })}
@@ -3407,6 +3438,46 @@ function MapKitTestPage() {
                       </text>
                     </g>
                   </g>
+                )
+              })}
+            </svg>
+            <svg
+              width="100%"
+              height="100%"
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 3,
+                pointerEvents: "none",
+                overflow: "visible",
+              }}
+            >
+              {projectedRoofPlanes.map((plane) => {
+                const visualPoints = plane.points.map((point) =>
+                  baseViewportPointToVisualViewportPoint(
+                    { x: point.x, y: point.y },
+                    precisionZoom,
+                  ),
+                )
+                const labelCenter = polygonLabelCenter(visualPoints)
+
+                return (
+                  <text
+                    key={`plane-squares-${plane.id}`}
+                    x={labelCenter.x}
+                    y={labelCenter.y + 13}
+                    fill="#fff"
+                    stroke="#000"
+                    strokeWidth={3}
+                    paintOrder="stroke"
+                    strokeLinejoin="round"
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={10}
+                    fontWeight={800}
+                  >
+                    {liveRoofPlaneSquaresById.get(plane.id) ?? "0sq"}
+                  </text>
                 )
               })}
             </svg>

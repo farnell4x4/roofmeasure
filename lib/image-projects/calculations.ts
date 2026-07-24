@@ -7,6 +7,7 @@ const SLOPE_ADJUSTED_LINE_TYPES = new Set<MeasurementType>(["rake", "hip", "vall
 export type ImageProjectCalculations = ProjectCalculations & {
   unassignedLength: number
   unassignedSlopeAdjustedLength: number
+  planeSquaresById: Record<string, number>
 }
 
 function emptyMeasurementTotals() {
@@ -49,7 +50,9 @@ export function calculateImageProjectTotals(project: ImageProject): ImageProject
 
   let totalPlanAreaSqFt = 0
   let totalSlopeAreaSqFt = 0
+  const planeSquaresById: Record<string, number> = {}
   for (const plane of project.planes) {
+    planeSquaresById[plane.id] = 0
     const boundarySegments = plane.pointKeys.map((pointKey, index) =>
       segmentByBoundary.get(boundaryKey(pointKey, plane.pointKeys[(index + 1) % plane.pointKeys.length])),
     )
@@ -82,7 +85,9 @@ export function calculateImageProjectTotals(project: ImageProject): ImageProject
     const feetPerPixel = calibrationScales.reduce((sum, scale) => sum + scale, 0) / calibrationScales.length
     const planAreaSqFt = pixelPolygonArea(points) * feetPerPixel ** 2
     totalPlanAreaSqFt += planAreaSqFt
-    totalSlopeAreaSqFt += planAreaSqFt * (pitchApplied ? pitchFactor(pitch) : 1)
+    const slopeAreaSqFt = planAreaSqFt * (pitchApplied ? pitchFactor(pitch) : 1)
+    totalSlopeAreaSqFt += slopeAreaSqFt
+    planeSquaresById[plane.id] = slopeAreaSqFt / 100
   }
 
   let unassignedLength = 0
@@ -118,5 +123,6 @@ export function calculateImageProjectTotals(project: ImageProject): ImageProject
     segmentCount: project.segments.length,
     unassignedLength,
     unassignedSlopeAdjustedLength,
+    planeSquaresById,
   }
 }

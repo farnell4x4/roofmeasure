@@ -40,6 +40,10 @@ describe("image project totals", () => {
     expect(totals.totalMeasuredLength).toBe(166)
     expect(totals.totalPlanAreaSqFt).toBe(1170)
     expect(totals.totalSlopeAreaSqFt).toBeCloseTo(1170 * Math.sqrt(1.25), 10)
+    expect(totals.planeSquaresById.plane).toBeCloseTo(
+      (1170 * Math.sqrt(1.25)) / 100,
+      10,
+    )
   })
 
   it("keeps untyped image lines visible in the report total", () => {
