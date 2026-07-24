@@ -3287,6 +3287,7 @@ function MapKitTestPage() {
               position: "absolute",
               inset: 0,
               zIndex: 0,
+              cursor: "crosshair",
             }}
           />
         </div>
