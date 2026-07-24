@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   applicationName: "Roof Tape Measure",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "default",
     title: "Roof Tape Measure"
   },
   manifest: "/manifest.webmanifest",
@@ -23,12 +23,12 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#c96f30",
+  themeColor: "#ffffff",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  viewportFit: "cover"
+  viewportFit: "contain"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

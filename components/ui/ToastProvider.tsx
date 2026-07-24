@@ -33,7 +33,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         aria-live="polite"
         style={{
           position: "fixed",
-          bottom: 18,
+          bottom: "calc(18px + var(--app-safe-bottom))",
           left: 16,
           right: 16,
           display: "grid",

@@ -2625,9 +2625,8 @@ function MapKitTestPage() {
 
   return (
     <main
+      className="fullscreen-safe-area"
       style={{
-        position: "fixed",
-        inset: 0,
         background: "#d9ddd8",
       }}
     >

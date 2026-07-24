@@ -18,6 +18,10 @@
   --radius-sm: 10px;
   --page-max: 1240px;
   --font-sans: "Avenir Next", "Segoe UI", sans-serif;
+  --app-safe-top: 0px;
+  --app-safe-right: 0px;
+  --app-safe-bottom: 0px;
+  --app-safe-left: 0px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -89,7 +93,17 @@ img {
 .app-shell {
   width: min(100%, var(--page-max));
   margin: 0 auto;
-  padding: 24px 16px 40px;
+  padding: calc(24px + var(--app-safe-top)) 16px calc(40px + var(--app-safe-bottom));
+}
+
+.fullscreen-safe-area {
+  position: fixed;
+  inset: var(--app-safe-top) var(--app-safe-right) var(--app-safe-bottom) var(--app-safe-left);
+}
+
+.safe-viewport-page {
+  min-height: calc(100dvh - var(--app-safe-top) - var(--app-safe-bottom));
+  margin-block: var(--app-safe-top) var(--app-safe-bottom);
 }
 
 .glass {
@@ -166,7 +180,7 @@ img {
 
 @media (max-width: 640px) {
   .app-shell {
-    padding: 16px 12px max(28px, env(safe-area-inset-bottom));
+    padding: calc(16px + var(--app-safe-top)) 12px calc(max(28px, env(safe-area-inset-bottom)) + var(--app-safe-bottom));
   }
 
   .projects-screen__header > .projects-screen__intro,
@@ -209,7 +223,7 @@ body.report-page-active {
 
 .report-page {
   min-height: 100vh;
-  padding: 28px 16px 48px;
+  padding: calc(28px + var(--app-safe-top)) 16px calc(48px + var(--app-safe-bottom));
   background: #eef1f5;
   color: #1f2522;
 }
@@ -434,7 +448,7 @@ body.report-page-active {
 
 @media (max-width: 620px) {
   .report-page {
-    padding: 16px 12px 32px;
+    padding: calc(16px + var(--app-safe-top)) 12px calc(32px + var(--app-safe-bottom));
   }
 
   .report-header {
@@ -466,6 +480,38 @@ body.report-page-active {
 
   .report-actions > button {
     flex: 1 1 140px;
+  }
+}
+
+/* Home-screen web apps use the full display. Keep a clear white buffer for
+   the status bar and home indicator, then constrain every app surface to it. */
+@media (display-mode: standalone) {
+  :root {
+    --app-safe-top: max(16px, env(safe-area-inset-top));
+    --app-safe-right: env(safe-area-inset-right);
+    --app-safe-bottom: max(16px, env(safe-area-inset-bottom));
+    --app-safe-left: env(safe-area-inset-left);
+  }
+
+  body::before,
+  body::after {
+    content: "";
+    position: fixed;
+    right: 0;
+    left: 0;
+    z-index: 100;
+    background: #fff;
+    pointer-events: none;
+  }
+
+  body::before {
+    top: 0;
+    height: var(--app-safe-top);
+  }
+
+  body::after {
+    bottom: 0;
+    height: var(--app-safe-bottom);
   }
 }
 
