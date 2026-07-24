@@ -1,8 +1,5 @@
-import { pitchFactor } from "@/lib/measurement/geometry"
 import { imagePointKey, type ImageMeasurementSegment, type ImageProject } from "@/types/image-projects"
-import type { MeasurementType, ProjectCalculations } from "@/types/models"
-
-const SLOPE_ADJUSTED_LINE_TYPES = new Set<MeasurementType>(["rake", "hip", "valley", "wall"])
+import type { ProjectCalculations } from "@/types/models"
 
 export type ImageProjectCalculations = ProjectCalculations & {
   unassignedLength: number
@@ -32,15 +29,14 @@ function pixelPolygonArea(points: Array<{ x: number; y: number }>) {
 /**
  * Image projects use entered line lengths as their source of truth. For a
  * completed plane, the image outline supplies its shape and each entered edge
- * calibrates that shape to feet before the same pitch rules as map projects
- * calculate slope area and roofing squares.
+ * calibrates that shape to feet. Those entered lengths already include slope,
+ * so an optional pitch is displayed but never applied to image calculations.
  */
 export function calculateImageProjectTotals(project: ImageProject): ImageProjectCalculations {
   const totals = emptyMeasurementTotals()
   const slopeAdjustedTotals = emptyMeasurementTotals()
   const segmentByBoundary = new Map<string, ImageMeasurementSegment>()
   const pointByKey = new Map<string, { x: number; y: number }>()
-  const pitchesBySegmentId = new Map<string, string[]>()
 
   for (const segment of project.segments) {
     segmentByBoundary.set(boundaryKey(imagePointKey(segment.start), imagePointKey(segment.end)), segment)
@@ -56,20 +52,6 @@ export function calculateImageProjectTotals(project: ImageProject): ImageProject
     const boundarySegments = plane.pointKeys.map((pointKey, index) =>
       segmentByBoundary.get(boundaryKey(pointKey, plane.pointKeys[(index + 1) % plane.pointKeys.length])),
     )
-    const pitchApplied =
-      boundarySegments.length > 0 &&
-      boundarySegments.every((segment) => segment?.type) &&
-      boundarySegments.filter((segment) => segment?.type && SLOPE_ADJUSTED_LINE_TYPES.has(segment.type)).length >= 2
-
-    const pitch = plane.pitch ?? project.singlePitch ?? "0/12"
-    if (pitchApplied) {
-      for (const segment of boundarySegments) {
-        if (segment?.type && SLOPE_ADJUSTED_LINE_TYPES.has(segment.type)) {
-          pitchesBySegmentId.set(segment.id, [...(pitchesBySegmentId.get(segment.id) ?? []), pitch])
-        }
-      }
-    }
-
     const points = plane.pointKeys.map((key) => pointByKey.get(key))
     const hasCompleteBoundary = boundarySegments.length === plane.pointKeys.length &&
       boundarySegments.every((segment) => segment && segment.lengthFeet > 0) &&
@@ -85,7 +67,7 @@ export function calculateImageProjectTotals(project: ImageProject): ImageProject
     const feetPerPixel = calibrationScales.reduce((sum, scale) => sum + scale, 0) / calibrationScales.length
     const planAreaSqFt = pixelPolygonArea(points) * feetPerPixel ** 2
     totalPlanAreaSqFt += planAreaSqFt
-    const slopeAreaSqFt = planAreaSqFt * (pitchApplied ? pitchFactor(pitch) : 1)
+    const slopeAreaSqFt = planAreaSqFt
     totalSlopeAreaSqFt += slopeAreaSqFt
     planeSquaresById[plane.id] = slopeAreaSqFt / 100
   }
@@ -101,11 +83,7 @@ export function calculateImageProjectTotals(project: ImageProject): ImageProject
     }
 
     totals[segment.type] += measuredLength
-    const pitches = pitchesBySegmentId.get(segment.id) ?? []
-    const pitch = SLOPE_ADJUSTED_LINE_TYPES.has(segment.type) && pitches.length
-      ? pitches.sort((left, right) => pitchFactor(right) - pitchFactor(left))[0]
-      : null
-    slopeAdjustedTotals[segment.type] += measuredLength * (pitch ? pitchFactor(pitch) : 1)
+    slopeAdjustedTotals[segment.type] += measuredLength
   }
 
   const totalMeasuredLength = Object.values(totals).reduce((sum, length) => sum + length, 0) + unassignedLength

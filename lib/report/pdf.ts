@@ -12,7 +12,7 @@ import {
   type ReportProject,
 } from "@/lib/report/model"
 
-export const REPORT_PDF_VERSION = 3
+export const REPORT_PDF_VERSION = 4
 
 const PAGE_WIDTH = 612
 const PAGE_HEIGHT = 792
@@ -149,6 +149,7 @@ export async function createReportPdf(
   const regular = await document.embedFont(StandardFonts.Helvetica)
   const bold = await document.embedFont(StandardFonts.HelveticaBold)
   const label = pdfSafeText(reportProjectLabel(project))
+  const imageProject = isImageProject(project)
   const unitSystem = reportUnitSystem(project)
   const displayDecimalFeet = reportDisplayDecimalFeet(project)
 
@@ -197,9 +198,9 @@ export async function createReportPdf(
   const summaryHeight = 64
   const summaryColumnWidth = CONTENT_WIDTH / 3
   const summaries = [
-    ["TOTAL ROOFING AREA", formatArea(totals.totalSlopeAreaSqFt, unitSystem)],
+    [imageProject ? "TOTAL ENTERED ROOFING AREA" : "TOTAL ROOFING AREA", formatArea(totals.totalSlopeAreaSqFt, unitSystem)],
     ["ROOFING SQUARES", totals.totalSquares.toFixed(2)],
-    ["TOTAL LINEAR FOOTAGE", formatLength(totals.totalMeasuredLength, unitSystem, displayDecimalFeet)],
+    [imageProject ? "TOTAL ENTERED FOOTAGE" : "TOTAL LINEAR FOOTAGE", formatLength(totals.totalMeasuredLength, unitSystem, displayDecimalFeet)],
   ]
   page.drawRectangle({
     x: PAGE_MARGIN,
@@ -235,8 +236,8 @@ export async function createReportPdf(
     borderColor: BORDER,
     borderWidth: 1,
   })
-  page.drawText("Linear footage by type", { x: PAGE_MARGIN + 18, y: cardTop - 27, size: 14, font: bold, color: DARK })
-  const measuredLineText = `${totals.segmentCount} measured ${totals.segmentCount === 1 ? "line" : "lines"}`
+  page.drawText(imageProject ? "Entered footage by type" : "Linear footage by type", { x: PAGE_MARGIN + 18, y: cardTop - 27, size: 14, font: bold, color: DARK })
+  const measuredLineText = `${totals.segmentCount} ${imageProject ? "entered" : "measured"} ${totals.segmentCount === 1 ? "line" : "lines"}`
   page.drawText(measuredLineText, {
     x: PAGE_WIDTH - PAGE_MARGIN - 18 - regular.widthOfTextAtSize(measuredLineText, 8),
     y: cardTop - 25,
@@ -247,15 +248,17 @@ export async function createReportPdf(
 
   const tableLeft = PAGE_MARGIN + 18
   const tableRight = PAGE_WIDTH - PAGE_MARGIN - 18
-  const measuredX = PAGE_MARGIN + 326
+  const measuredX = imageProject ? tableRight : PAGE_MARGIN + 326
   const adjustedX = tableRight
   const headerY = cardTop - 54
   page.drawRectangle({ x: tableLeft, y: headerY - 18, width: tableRight - tableLeft, height: 23, color: OFF_WHITE })
   page.drawText("LINE TYPE", { x: tableLeft + 8, y: headerY - 10, size: 7, font: bold, color: MUTED })
-  const measuredTitle = "MEASURED"
+  const measuredTitle = imageProject ? "ENTERED" : "MEASURED"
   const slopeTitle = "SLOPE-ADJUSTED"
   page.drawText(measuredTitle, { x: measuredX - bold.widthOfTextAtSize(measuredTitle, 7), y: headerY - 10, size: 7, font: bold, color: MUTED })
-  page.drawText(slopeTitle, { x: adjustedX - bold.widthOfTextAtSize(slopeTitle, 7), y: headerY - 10, size: 7, font: bold, color: MUTED })
+  if (!imageProject) {
+    page.drawText(slopeTitle, { x: adjustedX - bold.widthOfTextAtSize(slopeTitle, 7), y: headerY - 10, size: 7, font: bold, color: MUTED })
+  }
 
   let rowY = headerY - 37
   const drawRow = (name: string, measured: string, adjusted: string, isTotal = false) => {
@@ -267,13 +270,15 @@ export async function createReportPdf(
       font: isTotal ? bold : regular,
       color: DARK,
     })
-    page.drawText(pdfSafeText(adjusted), {
-      x: adjustedX - (isTotal ? bold : regular).widthOfTextAtSize(pdfSafeText(adjusted), 9),
-      y: rowY,
-      size: 9,
-      font: isTotal ? bold : regular,
-      color: DARK,
-    })
+    if (!imageProject) {
+      page.drawText(pdfSafeText(adjusted), {
+        x: adjustedX - (isTotal ? bold : regular).widthOfTextAtSize(pdfSafeText(adjusted), 9),
+        y: rowY,
+        size: 9,
+        font: isTotal ? bold : regular,
+        color: DARK,
+      })
+    }
     page.drawLine({ start: { x: tableLeft, y: rowY - 9 }, end: { x: tableRight, y: rowY - 9 }, thickness: 0.5, color: BORDER })
     rowY -= 24
   }

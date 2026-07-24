@@ -198,7 +198,7 @@ export function ReportScreen() {
 
         <section className="report-summary report-section">
           <div>
-            <span>Total roofing area</span>
+            <span>{imageProject ? "Total entered roofing area" : "Total roofing area"}</span>
             <strong>{formatArea(totals.totalSlopeAreaSqFt, unitSystem)}</strong>
           </div>
           <div>
@@ -206,23 +206,23 @@ export function ReportScreen() {
             <strong>{totals.totalSquares.toFixed(2)}</strong>
           </div>
           <div>
-            <span>Total linear footage</span>
+            <span>{imageProject ? "Total entered footage" : "Total linear footage"}</span>
             <strong>{formatLength(totals.totalMeasuredLength, unitSystem, displayDecimalFeet)}</strong>
           </div>
         </section>
 
         <section className="report-card report-section">
           <div className="report-section-heading">
-            <h2>Linear footage by type</h2>
-            <span>{totals.segmentCount} measured lines</span>
+            <h2>{imageProject ? "Entered footage by type" : "Linear footage by type"}</h2>
+            <span>{totals.segmentCount} {imageProject ? "entered" : "measured"} lines</span>
           </div>
           <div className="report-table-wrap">
             <table className="report-table">
               <thead>
                 <tr>
                   <th>Line type</th>
-                  <th>Measured</th>
-                  <th>Slope-adjusted</th>
+                  <th>{imageProject ? "Entered" : "Measured"}</th>
+                  {!imageProject ? <th>Slope-adjusted</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -231,7 +231,7 @@ export function ReportScreen() {
                   return <tr key={type}>
                     <td>{label}</td>
                     <td>{formatLength(lengths.measured, unitSystem, displayDecimalFeet)}</td>
-                    <td>{formatLength(lengths.slopeAdjusted, unitSystem, displayDecimalFeet)}</td>
+                    {!imageProject ? <td>{formatLength(lengths.slopeAdjusted, unitSystem, displayDecimalFeet)}</td> : null}
                   </tr>
                 })}
               </tbody>
@@ -239,7 +239,7 @@ export function ReportScreen() {
                 <tr>
                   <th>Total</th>
                   <th>{formatLength(totals.totalMeasuredLength, unitSystem, displayDecimalFeet)}</th>
-                  <th>{formatLength(totals.totalSlopeAdjustedLength, unitSystem, displayDecimalFeet)}</th>
+                  {!imageProject ? <th>{formatLength(totals.totalSlopeAdjustedLength, unitSystem, displayDecimalFeet)}</th> : null}
                 </tr>
               </tfoot>
             </table>
