@@ -3356,7 +3356,7 @@ function MapKitTestPage() {
                       style={{ pointerEvents: "auto", cursor: "pointer" }}
                       onClick={(event) => openPlanePitchMenu(event, plane)}
                     >
-                      {plane.pitch?.replace(/12$/, "") ?? "?/12"}
+                      {plane.pitch ?? "?/12"}
                     </text>
                     <text
                       x={labelCenter.x}
