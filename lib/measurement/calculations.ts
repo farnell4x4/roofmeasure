@@ -7,6 +7,7 @@ import {
   pitchFactor,
   roundedPolygonAreaSqFt,
 } from "@/lib/measurement/geometry";
+import { calculateNestedPlaneAreas } from "@/lib/measurement/plane-nesting";
 import { roundMeasurement } from "@/lib/measurement/rounding";
 
 const SLOPE_ADJUSTED_LINE_TYPES = new Set(["rake", "hip", "valley", "wall"]);
@@ -16,6 +17,8 @@ export type ProjectCalculationBreakdown = {
     id: string;
     pitch: string;
     pitchApplied: boolean;
+    grossPlanAreaSqFt: number;
+    nestedHoleAreaSqFt: number;
     planAreaSqFt: number;
     slopeFactor: number;
     slopeAreaSqFt: number;
@@ -76,8 +79,13 @@ export function getProjectCalculationBreakdown(
     ]) ?? [],
   );
   const pitchesBySlopeSegmentId = new Map<string, string[]>();
+  const averageLatitude = project.points.length
+    ? project.points.reduce((sum, point) => sum + point.lat, 0) /
+      project.points.length
+    : 0;
+  const longitudeScale = Math.cos((averageLatitude * Math.PI) / 180);
 
-  const planes = project.planes.map((plane) => {
+  const calculatedPlanes = project.planes.map((plane) => {
     const points = plane.pointIds
       .map((id) => pointMap.get(id))
       .filter((point): point is NonNullable<typeof point> => Boolean(point));
@@ -128,10 +136,34 @@ export function getProjectCalculationBreakdown(
       id: plane.id,
       pitch,
       pitchApplied,
-      planAreaSqFt,
+      grossPlanAreaSqFt: planAreaSqFt,
+      nestingPoints: points.map((point) => ({
+        x: point.lng * longitudeScale,
+        y: point.lat,
+      })),
       slopeFactor,
-      slopeAreaSqFt: planAreaSqFt * slopeFactor,
       boundarySegments,
+    };
+  });
+  const nestedPlanAreaById = calculateNestedPlaneAreas(
+    calculatedPlanes.map((plane) => ({
+      id: plane.id,
+      points: plane.nestingPoints,
+      area: plane.grossPlanAreaSqFt,
+    })),
+  );
+  const planes = calculatedPlanes.map((plane) => {
+    const planAreaSqFt = nestedPlanAreaById.get(plane.id) ?? plane.grossPlanAreaSqFt;
+    return {
+      id: plane.id,
+      pitch: plane.pitch,
+      pitchApplied: plane.pitchApplied,
+      grossPlanAreaSqFt: plane.grossPlanAreaSqFt,
+      planAreaSqFt,
+      nestedHoleAreaSqFt: plane.grossPlanAreaSqFt - planAreaSqFt,
+      slopeAreaSqFt: planAreaSqFt * plane.slopeFactor,
+      slopeFactor: plane.slopeFactor,
+      boundarySegments: plane.boundarySegments,
     };
   });
 

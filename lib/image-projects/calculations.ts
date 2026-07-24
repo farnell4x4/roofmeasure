@@ -1,5 +1,6 @@
 import { imagePointKey, type ImageMeasurementSegment, type ImageProject } from "@/types/image-projects"
 import type { ProjectCalculations } from "@/types/models"
+import { calculateNestedPlaneAreas } from "@/lib/measurement/plane-nesting"
 
 export type ImageProjectCalculations = ProjectCalculations & {
   unassignedLength: number
@@ -47,6 +48,11 @@ export function calculateImageProjectTotals(project: ImageProject): ImageProject
   let totalPlanAreaSqFt = 0
   let totalSlopeAreaSqFt = 0
   const planeSquaresById: Record<string, number> = {}
+  const calculatedPlaneRegions: Array<{
+    id: string
+    points: Array<{ x: number; y: number }>
+    area: number
+  }> = []
   for (const plane of project.planes) {
     planeSquaresById[plane.id] = 0
     const boundarySegments = plane.pointKeys.map((pointKey, index) =>
@@ -66,10 +72,15 @@ export function calculateImageProjectTotals(project: ImageProject): ImageProject
 
     const feetPerPixel = calibrationScales.reduce((sum, scale) => sum + scale, 0) / calibrationScales.length
     const planAreaSqFt = pixelPolygonArea(points) * feetPerPixel ** 2
+    calculatedPlaneRegions.push({ id: plane.id, points, area: planAreaSqFt })
+  }
+
+  const nestedPlanAreaById = calculateNestedPlaneAreas(calculatedPlaneRegions)
+  for (const plane of calculatedPlaneRegions) {
+    const planAreaSqFt = nestedPlanAreaById.get(plane.id) ?? plane.area
     totalPlanAreaSqFt += planAreaSqFt
-    const slopeAreaSqFt = planAreaSqFt
-    totalSlopeAreaSqFt += slopeAreaSqFt
-    planeSquaresById[plane.id] = slopeAreaSqFt / 100
+    totalSlopeAreaSqFt += planAreaSqFt
+    planeSquaresById[plane.id] = planAreaSqFt / 100
   }
 
   let unassignedLength = 0

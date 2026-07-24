@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { calculateImageProjectTotals } from "@/lib/image-projects/calculations"
-import type { ImageProject } from "@/types/image-projects"
+import { imagePointKey, type ImageProject } from "@/types/image-projects"
 
 function createImageProject(): ImageProject {
   return {
@@ -55,5 +55,38 @@ describe("image project totals", () => {
     expect(totals.unassignedLength).toBe(24)
     expect(totals.totalMeasuredLength).toBe(24)
     expect(totals.totalSlopeAdjustedLength).toBe(24)
+  })
+
+  it("counts nested image planes once", () => {
+    const project = createImageProject()
+    const square = (id: string, left: number, top: number, size: number) => {
+      const a = { x: left, y: top }
+      const b = { x: left + size, y: top }
+      const c = { x: left + size, y: top + size }
+      const d = { x: left, y: top + size }
+      project.segments.push(
+        { id: `${id}-ab`, type: "eave", start: a, end: b, lengthFeet: size },
+        { id: `${id}-bc`, type: "rake", start: b, end: c, lengthFeet: size },
+        { id: `${id}-cd`, type: "ridge", start: c, end: d, lengthFeet: size },
+        { id: `${id}-da`, type: "rake", start: d, end: a, lengthFeet: size },
+      )
+      project.planes.push({
+        id,
+        pointKeys: [imagePointKey(a), imagePointKey(b), imagePointKey(c), imagePointKey(d)],
+      })
+    }
+    square("outer", 0, 0, 100)
+    square("middle", 20, 20, 60)
+    square("inner", 40, 40, 20)
+
+    const totals = calculateImageProjectTotals(project)
+
+    expect(totals.totalPlanAreaSqFt).toBe(10_000)
+    expect(totals.totalSlopeAreaSqFt).toBe(10_000)
+    expect(totals.planeSquaresById).toMatchObject({
+      outer: 64,
+      middle: 32,
+      inner: 4,
+    })
   })
 })

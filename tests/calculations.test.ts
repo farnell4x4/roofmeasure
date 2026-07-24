@@ -294,4 +294,47 @@ describe("project totals", () => {
       slopeAdjustedLengthFeet: 10 * Math.sqrt(1.25),
     });
   });
+
+  it("counts each nested map plane once by subtracting direct inner boundaries", () => {
+    const project = createEmptyProject("Nested planes");
+    project.points = [
+      { id: "outer-a", lat: 39, lng: -105 },
+      { id: "outer-b", lat: 39, lng: -104.9996 },
+      { id: "outer-c", lat: 39.0004, lng: -104.9996 },
+      { id: "outer-d", lat: 39.0004, lng: -105 },
+      { id: "middle-a", lat: 39.0001, lng: -104.9999 },
+      { id: "middle-b", lat: 39.0001, lng: -104.9997 },
+      { id: "middle-c", lat: 39.0003, lng: -104.9997 },
+      { id: "middle-d", lat: 39.0003, lng: -104.9999 },
+      { id: "inner-a", lat: 39.00016, lng: -104.99984 },
+      { id: "inner-b", lat: 39.00016, lng: -104.99976 },
+      { id: "inner-c", lat: 39.00024, lng: -104.99976 },
+      { id: "inner-d", lat: 39.00024, lng: -104.99984 },
+    ];
+    project.planes = [
+      { id: "outer", name: "Outer", pointIds: ["outer-a", "outer-b", "outer-c", "outer-d"], planAreaSqFt: 0, source: "auto" },
+      { id: "middle", name: "Middle", pointIds: ["middle-a", "middle-b", "middle-c", "middle-d"], planAreaSqFt: 0, source: "auto" },
+      { id: "inner", name: "Inner", pointIds: ["inner-a", "inner-b", "inner-c", "inner-d"], planAreaSqFt: 0, source: "auto" },
+    ];
+
+    const breakdown = getProjectCalculationBreakdown(project);
+    const planes = new Map(breakdown.planes.map((plane) => [plane.id, plane]));
+    const outer = planes.get("outer")!;
+    const middle = planes.get("middle")!;
+    const inner = planes.get("inner")!;
+
+    expect(outer.planAreaSqFt).toBeCloseTo(
+      outer.grossPlanAreaSqFt - middle.grossPlanAreaSqFt,
+      6,
+    );
+    expect(middle.planAreaSqFt).toBeCloseTo(
+      middle.grossPlanAreaSqFt - inner.grossPlanAreaSqFt,
+      6,
+    );
+    expect(inner.planAreaSqFt).toBeCloseTo(inner.grossPlanAreaSqFt, 6);
+    expect(calculateProjectTotals(project).totalPlanAreaSqFt).toBeCloseTo(
+      outer.grossPlanAreaSqFt,
+      6,
+    );
+  });
 });
