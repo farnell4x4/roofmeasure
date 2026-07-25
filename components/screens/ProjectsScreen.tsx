@@ -1,6 +1,6 @@
 "use client"
 
-import { FileImage, FileText, FolderOpen, MapPinned, Trash2, Upload } from "lucide-react"
+import { FileImage, FileText, FolderOpen, MapPinned, Trash2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/Button"
@@ -77,17 +77,6 @@ export function ProjectsScreen() {
     await refreshAllProjects()
   }
 
-  async function handleImportProject(
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) {
-    const file = event.target.files?.[0]
-    if (!file) return
-    const text = await file.text()
-    await db.importProject(text)
-    push({ title: "Project imported.", tone: "success" })
-    await refreshAllProjects()
-  }
-
   function handleOpenProject(project: (typeof projects)[number]) {
     const totals = calculateProjectTotals(project)
     appendPersistenceDebugNote(
@@ -107,7 +96,6 @@ export function ProjectsScreen() {
     <main className="app-shell page-grid projects-screen">
       <section className="projects-screen__header">
         <div className="projects-screen__intro">
-          <p className="chip">Saved Projects</p>
           <h1 style={{ marginBottom: 8 }}>Local projects and reports</h1>
           <p style={{ color: "var(--muted)", margin: 0 }}>
             Search, sort, view a report, or reopen any locally stored roof
@@ -150,19 +138,6 @@ export function ProjectsScreen() {
               <option value="name">Name</option>
               <option value="address">Address</option>
             </select>
-          </label>
-        </div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <label>
-            <input
-              className="sr-only"
-              type="file"
-              accept="application/json"
-              onChange={handleImportProject}
-            />
-            <Button variant="secondary" type="button">
-              <Upload size={18} /> Import Project
-            </Button>
           </label>
         </div>
       </Card>

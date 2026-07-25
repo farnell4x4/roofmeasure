@@ -732,6 +732,12 @@ function MapKitTestPage() {
     }
   }
 
+  const restoreLocationAlertForUnavailableLocation = useCallback(() => {
+    if (!locationAlert) return
+    if (locationState === "granted" && locationBias) return
+    restoreLocationAlert()
+  }, [locationAlert, locationBias, locationState])
+
   function replaceMeasurementGeometry(next: MeasurementGeometryState) {
     const normalized = normalizeMeasurementGeometry(next)
     measurementGeometryRef.current = normalized
@@ -975,6 +981,7 @@ function MapKitTestPage() {
   }
 
   function prepareForAddressSelection() {
+    restoreLocationAlertForUnavailableLocation()
     resetSuperZoom()
     setIsSatelliteMapActive(false)
     mapCameraRef.current = null
@@ -2005,6 +2012,10 @@ function MapKitTestPage() {
     if (measurementSegments.length === 0 && !pendingLineStart) return
     scheduleProjectionRefresh()
   }, [mapReady, projectHydrated, measurementSegments, pendingLineStart])
+
+  useEffect(() => {
+    restoreLocationAlertForUnavailableLocation()
+  }, [newProjectRequested, projectId, restoreLocationAlertForUnavailableLocation])
 
   useEffect(() => {
     let permissionStatus: PermissionStatus | null = null
