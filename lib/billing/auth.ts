@@ -1,4 +1,4 @@
-import { CompactSign, compactVerify, importPKCS8, importSPKI } from "jose";
+import { CompactSign, compactVerify } from "jose";
 import { createBillingRepository } from "@/lib/billing/repository";
 import { getRuntimeEnvSnapshot } from "@/lib/config/env";
 import type { BillingEntitlementPayload } from "@/types/billing";
@@ -37,10 +37,22 @@ async function getEntitlementPrivateKey() {
   if (!env.BILLING_ENTITLEMENT_PRIVATE_KEY) {
     throw new Error("Missing BILLING_ENTITLEMENT_PRIVATE_KEY.");
   }
-  return importPKCS8(
-    env.BILLING_ENTITLEMENT_PRIVATE_KEY.replace(/\\n/g, "\n"),
-    "ES256",
+  return crypto.subtle.importKey(
+    "pkcs8",
+    pemToDer(env.BILLING_ENTITLEMENT_PRIVATE_KEY),
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"],
   );
+}
+
+function pemToDer(pem: string) {
+  const base64 = pem
+    .replace(/-----BEGIN [^-]+-----/g, "")
+    .replace(/-----END [^-]+-----/g, "")
+    .replace(/\\n/g, "")
+    .replace(/\s+/g, "");
+  return Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
 }
 
 export function generateMagicLinkToken() {
@@ -95,9 +107,12 @@ export async function verifyBillingEntitlementToken(token: string) {
   if (!env.NEXT_PUBLIC_BILLING_ENTITLEMENT_PUBLIC_KEY) {
     throw new Error("Missing NEXT_PUBLIC_BILLING_ENTITLEMENT_PUBLIC_KEY.");
   }
-  const verifier = await importSPKI(
-    env.NEXT_PUBLIC_BILLING_ENTITLEMENT_PUBLIC_KEY.replace(/\\n/g, "\n"),
-    "ES256",
+  const verifier = await crypto.subtle.importKey(
+    "spki",
+    pemToDer(env.NEXT_PUBLIC_BILLING_ENTITLEMENT_PUBLIC_KEY),
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["verify"],
   );
   const { payload } = await compactVerify(token, verifier);
   const parsed = JSON.parse(new TextDecoder().decode(payload)) as BillingEntitlementPayload;
