@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderOpen, MoonStar, Ruler, SunMedium } from "lucide-react";
+import { CreditCard, FolderOpen, MoonStar, Ruler, SunMedium } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -64,6 +64,9 @@ export function SettingsScreen() {
 
         <Button variant="secondary" onClick={() => router.push("/projects")}>
           <FolderOpen size={18} /> Projects
+        </Button>
+        <Button variant="secondary" onClick={() => router.push("/billing")}>
+          <CreditCard size={18} /> Billing
         </Button>
       </Card>
     </main>

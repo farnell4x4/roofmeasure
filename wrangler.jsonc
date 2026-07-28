@@ -11,5 +11,13 @@
   },
   "observability": {
     "enabled": true
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "roofmeasure",
+      "database_id": "599eaed4-f5c6-4a15-b617-578f82fcd2cf",
+      "migrations_dir": "d1/migrations"
+    }
+  ]
 }

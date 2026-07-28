@@ -2,11 +2,14 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Roof Tape Measure: Restart Dev + Refresh Safari",
+      "label": "Roof Tape Measure: Rebuild Remote Worker + Refresh Safari",
       "type": "shell",
       "command": "sh scripts/restart-dev-and-refresh-safari.sh",
       "options": {
         "cwd": "${workspaceFolder}"
+      },
+      "runOptions": {
+        "instanceLimit": 1
       },
       "presentation": {
         "reveal": "always",

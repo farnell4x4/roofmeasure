@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { refreshBillingEntitlementIfNeeded } from "@/lib/billing/entitlement-client";
 import { CalculationDebugOverlay } from "@/components/app/CalculationDebugOverlay";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 
@@ -9,6 +10,10 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => undefined);
     }
+  }, []);
+
+  useEffect(() => {
+    void refreshBillingEntitlementIfNeeded().catch(() => undefined);
   }, []);
 
   return (

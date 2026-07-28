@@ -5,31 +5,41 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 READY_URL="${READY_URL:-http://localhost:3000}"
 APP_URL="${APP_URL:-http://localhost:3000}"
+PORT="3000"
 LOG_FILE="${TMPDIR:-/tmp}/roofmeasure-dev.log"
 PID_FILE="${TMPDIR:-/tmp}/roofmeasure-dev.pid"
 
 cd "$ROOT_DIR"
 
-if [ -f "$PID_FILE" ]; then
-  EXISTING_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
-  if [ -n "${EXISTING_PID:-}" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
-    kill "$EXISTING_PID" 2>/dev/null || true
-    sleep 1
-  fi
-fi
-
-PIDS="$(pgrep -f "next dev|npm run dev" 2>/dev/null || true)"
-if [ -n "$PIDS" ]; then
-  echo "$PIDS" | while IFS= read -r pid; do
+PORT_PIDS="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
+if [ -n "$PORT_PIDS" ]; then
+  echo "$PORT_PIDS" | while IFS= read -r pid; do
     [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
   done
-  sleep 1
 fi
+
+ATTEMPTS=0
+while lsof -tiTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; do
+  ATTEMPTS=$((ATTEMPTS + 1))
+  if [ "$ATTEMPTS" -ge 10 ]; then
+    REMAINING_PIDS="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
+    if [ -n "$REMAINING_PIDS" ]; then
+      echo "$REMAINING_PIDS" | while IFS= read -r pid; do
+        [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null || true
+      done
+    fi
+    break
+  fi
+  sleep 1
+done
 
 rm -f "$PID_FILE"
 : >"$LOG_FILE"
 
-npm run dev >"$LOG_FILE" 2>&1 &
+echo "Building the Roof Tape Measure Cloudflare Worker..."
+npm run cf:build
+
+npx wrangler dev --remote --var LOCAL_REMOTE_DEV:1 --ip 127.0.0.1 --port "$PORT" >>"$LOG_FILE" 2>&1 &
 DEV_PID=$!
 echo "$DEV_PID" >"$PID_FILE"
 

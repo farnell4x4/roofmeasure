@@ -11,6 +11,7 @@ import { MEASUREMENT_TYPES } from "@/lib/measurement/constants"
 import { roundMeasurement } from "@/lib/measurement/rounding"
 import { formatRoofingSquares } from "@/lib/measurement/units"
 import { calculateImageProjectTotals } from "@/lib/image-projects/calculations"
+import { canCreateLocalProject, LOCAL_PROJECT_LIMIT_MESSAGE, recordLocalProjectCreated } from "@/lib/billing/local-access"
 import type { MeasurementType } from "@/types/models"
 import { imagePointKey, type ImageMeasurementSegment, type ImagePoint, type ImageProject } from "@/types/image-projects"
 
@@ -66,6 +67,19 @@ function ImageProjectScreen() {
     stageRef.current = node
     if (node) setStageSize({ width: node.clientWidth, height: node.clientHeight })
   }, [])
+
+  useEffect(() => {
+    if (!requestedNew) return
+    let cancelled = false
+    void canCreateLocalProject()
+      .then((allowed) => {
+        if (!allowed && !cancelled) router.replace("/billing?paywall=project-limit")
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [requestedNew, router])
 
   useEffect(() => {
     if (!projectId || requestedNew) { setProject(null); setIsLoading(false); return }
@@ -222,7 +236,21 @@ function ImageProjectScreen() {
     event.target.value = ""
     if (!file) return
     if (!file.type.startsWith("image/")) { setMessage("Choose an image file."); return }
-    readImageDimensions(file).then(({ width, height }) => db.saveImageProject(createImageProject(file, width, height))).then((saved) => router.replace(`/image?projectId=${saved.id}`)).catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Could not create photo project."))
+    canCreateLocalProject()
+      .then((allowed) => {
+        if (!allowed) {
+          setMessage(LOCAL_PROJECT_LIMIT_MESSAGE)
+          router.push("/billing?paywall=project-limit")
+          return null
+        }
+        return readImageDimensions(file)
+          .then(({ width, height }) => db.saveImageProject(createImageProject(file, width, height)))
+          .then(async (saved) => {
+            await recordLocalProjectCreated()
+            router.replace(`/image?projectId=${saved.id}`)
+          })
+      })
+      .catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Could not create photo project."))
   }
   function handleStageClick(event: React.MouseEvent<HTMLDivElement>) {
     if (ignoreNextStageClick.current) { ignoreNextStageClick.current = false; return }

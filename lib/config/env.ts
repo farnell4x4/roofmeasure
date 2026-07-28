@@ -12,10 +12,20 @@ export const requiredMapKitEnvKeys = [
 type RequiredMapKitEnvKey = (typeof requiredMapKitEnvKeys)[number];
 type RuntimeEnvKey =
   | "NEXT_PUBLIC_APP_NAME"
+  | "NEXT_PUBLIC_APP_URL"
+  | "NEXT_PUBLIC_BILLING_ENTITLEMENT_PUBLIC_KEY"
   | "NEXT_PUBLIC_MAPKIT_JS_KEY"
   | "MAPKIT_TEAM_ID"
   | "MAPKIT_KEY_ID"
-  | "MAPKIT_PRIVATE_KEY";
+  | "MAPKIT_PRIVATE_KEY"
+  | "BILLING_ENTITLEMENT_PRIVATE_KEY"
+  | "MAGIC_LINK_FROM_EMAIL"
+  | "MAGIC_LINK_FROM_NAME"
+  | "RESEND_API_KEY"
+  | "STRIPE_SECRET_KEY"
+  | "STRIPE_WEBHOOK_SECRET"
+  | "STRIPE_PORTAL_CONFIGURATION_ID"
+  | "STRIPE_BILLING_PLANS_JSON";
 type RuntimeEnvSnapshot = Record<RuntimeEnvKey, string>;
 
 function readProcessEnvValue(key: string) {
@@ -48,6 +58,12 @@ function buildRuntimeEnvSnapshot(
       readCloudflareEnvValue(cloudflareEnv, "NEXT_PUBLIC_APP_NAME") ||
       readProcessEnvValue("NEXT_PUBLIC_APP_NAME") ||
       DEFAULT_APP_NAME,
+    NEXT_PUBLIC_APP_URL:
+      readCloudflareEnvValue(cloudflareEnv, "NEXT_PUBLIC_APP_URL") ||
+      readProcessEnvValue("NEXT_PUBLIC_APP_URL"),
+    NEXT_PUBLIC_BILLING_ENTITLEMENT_PUBLIC_KEY:
+      readCloudflareEnvValue(cloudflareEnv, "NEXT_PUBLIC_BILLING_ENTITLEMENT_PUBLIC_KEY") ||
+      readProcessEnvValue("NEXT_PUBLIC_BILLING_ENTITLEMENT_PUBLIC_KEY"),
     NEXT_PUBLIC_MAPKIT_JS_KEY:
       readCloudflareEnvValue(cloudflareEnv, "NEXT_PUBLIC_MAPKIT_JS_KEY") ||
       readProcessEnvValue("NEXT_PUBLIC_MAPKIT_JS_KEY"),
@@ -59,7 +75,31 @@ function buildRuntimeEnvSnapshot(
       readProcessEnvValue("MAPKIT_KEY_ID"),
     MAPKIT_PRIVATE_KEY:
       readCloudflareEnvValue(cloudflareEnv, "MAPKIT_PRIVATE_KEY") ||
-      readProcessEnvValue("MAPKIT_PRIVATE_KEY")
+      readProcessEnvValue("MAPKIT_PRIVATE_KEY"),
+    BILLING_ENTITLEMENT_PRIVATE_KEY:
+      readCloudflareEnvValue(cloudflareEnv, "BILLING_ENTITLEMENT_PRIVATE_KEY") ||
+      readProcessEnvValue("BILLING_ENTITLEMENT_PRIVATE_KEY"),
+    MAGIC_LINK_FROM_EMAIL:
+      readCloudflareEnvValue(cloudflareEnv, "MAGIC_LINK_FROM_EMAIL") ||
+      readProcessEnvValue("MAGIC_LINK_FROM_EMAIL"),
+    MAGIC_LINK_FROM_NAME:
+      readCloudflareEnvValue(cloudflareEnv, "MAGIC_LINK_FROM_NAME") ||
+      readProcessEnvValue("MAGIC_LINK_FROM_NAME"),
+    RESEND_API_KEY:
+      readCloudflareEnvValue(cloudflareEnv, "RESEND_API_KEY") ||
+      readProcessEnvValue("RESEND_API_KEY"),
+    STRIPE_SECRET_KEY:
+      readCloudflareEnvValue(cloudflareEnv, "STRIPE_SECRET_KEY") ||
+      readProcessEnvValue("STRIPE_SECRET_KEY"),
+    STRIPE_WEBHOOK_SECRET:
+      readCloudflareEnvValue(cloudflareEnv, "STRIPE_WEBHOOK_SECRET") ||
+      readProcessEnvValue("STRIPE_WEBHOOK_SECRET"),
+    STRIPE_PORTAL_CONFIGURATION_ID:
+      readCloudflareEnvValue(cloudflareEnv, "STRIPE_PORTAL_CONFIGURATION_ID") ||
+      readProcessEnvValue("STRIPE_PORTAL_CONFIGURATION_ID"),
+    STRIPE_BILLING_PLANS_JSON:
+      readCloudflareEnvValue(cloudflareEnv, "STRIPE_BILLING_PLANS_JSON") ||
+      readProcessEnvValue("STRIPE_BILLING_PLANS_JSON")
   };
 }
 

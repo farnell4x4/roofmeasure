@@ -13,6 +13,7 @@ import { formatArea } from "@/lib/measurement/units"
 import { calculateProjectTotals } from "@/lib/measurement/calculations"
 import { useProjects } from "@/hooks/useProjects"
 import { appendPersistenceDebugNote } from "@/lib/debug/persistence-debug"
+import { canCreateLocalProject, LOCAL_PROJECT_LIMIT_MESSAGE } from "@/lib/billing/local-access"
 import type { ImageProjectListItem } from "@/types/image-projects"
 
 export function ProjectsScreen() {
@@ -41,6 +42,15 @@ export function ProjectsScreen() {
 
   async function refreshAllProjects() {
     await Promise.all([refresh(), db.listImageProjects().then(setImageProjects)])
+  }
+
+  async function startNewProject(path: "/?new=1" | "/image?new=1") {
+    if (!(await canCreateLocalProject())) {
+      push({ title: LOCAL_PROJECT_LIMIT_MESSAGE, tone: "default" })
+      router.push("/billing?paywall=project-limit")
+      return
+    }
+    router.push(path)
   }
 
   const filtered = useMemo(() => {
@@ -103,10 +113,10 @@ export function ProjectsScreen() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Button onClick={() => router.push("/?new=1")}>
+          <Button onClick={() => void startNewProject("/?new=1")}>
             <MapPinned size={18} /> New Map Project
           </Button>
-          <Button variant="secondary" onClick={() => router.push("/image?new=1")}>
+          <Button variant="secondary" onClick={() => void startNewProject("/image?new=1")}>
             <FileImage size={18} /> Upload Roof Image
           </Button>
         </div>
@@ -148,7 +158,7 @@ export function ProjectsScreen() {
           title="No saved projects yet"
           description="Search an address from the measuring screen to create a saved local project. Imported projects also appear here."
           actionLabel="Start New Project"
-          onAction={() => router.push("/image?new=1")}
+          onAction={() => void startNewProject("/image?new=1")}
         />
       ) : null}
 

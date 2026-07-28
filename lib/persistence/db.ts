@@ -4,16 +4,34 @@ import { AppPreferences, Project, SCHEMA_VERSION } from "@/types/models"
 import { ImageProject, ImageProjectListItem } from "@/types/image-projects"
 
 const DB_NAME = "roofmeasure-db"
-const DB_VERSION = 4
+const DB_VERSION = 6
 const PROJECTS_STORE = "projects"
 const PREFERENCES_STORE = "preferences"
 const RECOVERY_STORE = "recovery"
 const REPORT_PDFS_STORE = "report-pdfs"
 const IMAGE_PROJECTS_STORE = "image-projects"
 const IMAGE_ASSETS_STORE = "image-assets"
+const BILLING_ENTITLEMENT_STORE = "billing-entitlement"
+const LOCAL_TRIAL_STORE = "local-trial"
 
 type StoredImageProject = ImageProjectListItem & { image?: Blob }
 type ImageAsset = { id: string; image: Blob }
+type BillingEntitlementRecord = {
+  id: "current"
+  token: string
+  payload: {
+    user_id: string
+    subscription_active: boolean
+    plan: string | null
+    issued_at: string
+    expires_at: string
+  }
+}
+
+type LocalTrialRecord = {
+  id: "current"
+  freeProjectUsed: boolean
+}
 
 type RecoveryEntry = {
   id: string
@@ -44,6 +62,12 @@ async function getDatabase() {
       }
       if (oldVersion < 4) {
         database.createObjectStore(IMAGE_ASSETS_STORE, { keyPath: "id" })
+      }
+      if (oldVersion < 5) {
+        database.createObjectStore(BILLING_ENTITLEMENT_STORE, { keyPath: "id" })
+      }
+      if (oldVersion < 6) {
+        database.createObjectStore(LOCAL_TRIAL_STORE, { keyPath: "id" })
       }
     },
   })
@@ -201,5 +225,26 @@ export const db = {
   async saveReportPdf(projectId: string, report: CachedReportPdf) {
     const database = await getDatabase()
     await database.put(REPORT_PDFS_STORE, { projectId, ...report })
+  },
+  async getBillingEntitlement() {
+    const database = await getDatabase()
+    return (await database.get(BILLING_ENTITLEMENT_STORE, "current")) as
+      BillingEntitlementRecord | undefined
+  },
+  async saveBillingEntitlement(record: BillingEntitlementRecord) {
+    const database = await getDatabase()
+    await database.put(BILLING_ENTITLEMENT_STORE, record)
+  },
+  async clearBillingEntitlement() {
+    const database = await getDatabase()
+    await database.delete(BILLING_ENTITLEMENT_STORE, "current")
+  },
+  async getLocalTrial() {
+    const database = await getDatabase()
+    return (await database.get(LOCAL_TRIAL_STORE, "current")) as LocalTrialRecord | undefined
+  },
+  async markFreeProjectUsed() {
+    const database = await getDatabase()
+    await database.put(LOCAL_TRIAL_STORE, { id: "current", freeProjectUsed: true } satisfies LocalTrialRecord)
   },
 }

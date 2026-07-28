@@ -53,6 +53,7 @@ import {
 } from "@/lib/measurement/calculations"
 import { detectRoofPlanes } from "@/lib/measurement/plane-detection"
 import { createImageProject, readImageDimensions } from "@/lib/image-projects/factory"
+import { canCreateLocalProject, LOCAL_PROJECT_LIMIT_MESSAGE, recordLocalProjectCreated } from "@/lib/billing/local-access"
 import { AddressSuggestion } from "@/types/mapkit"
 import {
   EditableMeasurementPoint as MeasurementPoint,
@@ -507,6 +508,19 @@ function MapKitTestPage() {
       window.localStorage.getItem(LOCATION_ALERT_DISMISSED_KEY) === "1",
     )
   }, [])
+
+  useEffect(() => {
+    if (!newProjectRequested) return
+    let cancelled = false
+    void canCreateLocalProject()
+      .then((allowed) => {
+        if (!allowed && !cancelled) router.replace("/billing?paywall=project-limit")
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [newProjectRequested, router])
 
   useEffect(() => {
     let cancelled = false
@@ -1043,6 +1057,11 @@ function MapKitTestPage() {
     const hasExplicitRoofPlanes = Boolean(options && "roofPlanes" in options)
     const snapshotRoofPlanes = options?.roofPlanes
     const persistSnapshot = async () => {
+      if (options?.startNewProject && !(await canCreateLocalProject())) {
+        setSearchMessage(LOCAL_PROJECT_LIMIT_MESSAGE)
+        router.push("/billing?paywall=project-limit")
+        return null
+      }
       if (projectEpoch !== projectEpochRef.current) return null
       const existingProject = targetProjectId
         ? await db.getProject(targetProjectId)
@@ -1149,6 +1168,10 @@ function MapKitTestPage() {
         throw new Error(
           "IndexedDB reread did not match the measurement geometry that was saved.",
         )
+      }
+
+      if (options?.startNewProject) {
+        await recordLocalProjectCreated()
       }
 
       if (projectEpoch !== projectEpochRef.current) return savedProject
@@ -2385,10 +2408,16 @@ function MapKitTestPage() {
     if (!file || !file.type.startsWith("image/")) return
 
     try {
+      if (!(await canCreateLocalProject())) {
+        setSearchMessage(LOCAL_PROJECT_LIMIT_MESSAGE)
+        router.push("/billing?paywall=project-limit")
+        return
+      }
       const { width, height } = await readImageDimensions(file)
       const imageProject = await db.saveImageProject(
         createImageProject(file, width, height),
       )
+      await recordLocalProjectCreated()
       router.push(`/image?projectId=${encodeURIComponent(imageProject.id)}`)
     } catch (error) {
       setSearchState("error")
