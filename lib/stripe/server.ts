@@ -44,6 +44,7 @@ export async function getStripeEnv() {
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
     portalConfigurationId: env.STRIPE_PORTAL_CONFIGURATION_ID,
     plansJson: env.STRIPE_BILLING_PLANS_JSON,
+    monthlyPriceId: env.STRIPE_PRICE_ID_MONTHLY,
   };
 }
 
@@ -64,6 +65,15 @@ export async function getStripeClient() {
 
 export async function getStripeBillingPlans() {
   const env = await getStripeEnv();
+  if (!env.plansJson && env.monthlyPriceId) {
+    return [{
+      id: "pro-monthly",
+      name: "Roof Tape Measure Pro",
+      description: "Unlimited roof measurements billed monthly.",
+      priceId: env.monthlyPriceId,
+      interval: "month",
+    } satisfies StripeBillingPlan];
+  }
   if (!env.plansJson) return [];
 
   let parsed: unknown;

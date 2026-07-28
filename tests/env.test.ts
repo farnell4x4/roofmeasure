@@ -26,6 +26,7 @@ describe("runtime env helpers", () => {
     delete process.env.STRIPE_WEBHOOK_SECRET;
     delete process.env.STRIPE_PORTAL_CONFIGURATION_ID;
     delete process.env.STRIPE_BILLING_PLANS_JSON;
+    delete process.env.STRIPE_PRICE_ID_MONTHLY;
   });
 
   it("prefers Cloudflare runtime bindings when available", async () => {
@@ -46,6 +47,7 @@ describe("runtime env helpers", () => {
         STRIPE_WEBHOOK_SECRET: "whsec_cf",
         STRIPE_PORTAL_CONFIGURATION_ID: "bpc_cf",
         STRIPE_BILLING_PLANS_JSON: '[{"id":"starter","name":"Starter","description":"desc","priceId":"price_1","interval":"month"}]'
+        ,STRIPE_PRICE_ID_MONTHLY: "price_monthly_cf"
       }
     });
 
@@ -64,6 +66,7 @@ describe("runtime env helpers", () => {
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_process";
     process.env.STRIPE_PORTAL_CONFIGURATION_ID = "bpc_process";
     process.env.STRIPE_BILLING_PLANS_JSON = "[]";
+    process.env.STRIPE_PRICE_ID_MONTHLY = "price_monthly_local";
 
     const { getEnv } = await import("@/lib/config/env");
     const env = await getEnv();
@@ -113,7 +116,8 @@ describe("runtime env helpers", () => {
       STRIPE_SECRET_KEY: "rk_test_local",
       STRIPE_WEBHOOK_SECRET: "whsec_local",
       STRIPE_PORTAL_CONFIGURATION_ID: "bpc_local",
-      STRIPE_BILLING_PLANS_JSON: "[]"
+      STRIPE_BILLING_PLANS_JSON: "[]",
+      STRIPE_PRICE_ID_MONTHLY: "price_monthly_local"
     });
   });
 
