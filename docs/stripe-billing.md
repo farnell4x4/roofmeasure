@@ -9,7 +9,7 @@ This app uses:
 - A signed 30-day entitlement token stored locally in IndexedDB for offline-friendly paid-feature unlocks
 
 ## Cloudflare setup
-
+  
 1. Create the D1 database.
 2. Replace `REPLACE_WITH_REAL_D1_DATABASE_ID` in `wrangler.jsonc`.
 3. Apply the migration:
