@@ -1,4 +1,3 @@
-import { CompactSign, compactVerify } from "jose";
 import { createBillingRepository } from "@/lib/billing/repository";
 import { getRuntimeEnvSnapshot } from "@/lib/config/env";
 import type { BillingEntitlementPayload } from "@/types/billing";
@@ -13,6 +12,12 @@ function toBase64Url(bytes: Uint8Array | ArrayBuffer) {
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
+}
+
+function fromBase64Url(value: string) {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = `${base64}${"=".repeat((4 - (base64.length % 4)) % 4)}`;
+  return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
 }
 
 async function sha256(value: string) {
@@ -94,11 +99,19 @@ export async function createBillingEntitlementToken(payload: Omit<BillingEntitle
     expires_at: expiresAt.toISOString(),
   };
   const signer = await getEntitlementPrivateKey();
-  const token = await new CompactSign(
+  const encodedHeader = toBase64Url(
+    new TextEncoder().encode(JSON.stringify({ alg: "ES256", typ: "JWT" })),
+  );
+  const encodedPayload = toBase64Url(
     new TextEncoder().encode(JSON.stringify(fullPayload)),
-  )
-    .setProtectedHeader({ alg: "ES256", typ: "JWT" })
-    .sign(signer);
+  );
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const signature = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    signer,
+    new TextEncoder().encode(signingInput),
+  );
+  const token = `${signingInput}.${toBase64Url(signature)}`;
   return { token, payload: fullPayload };
 }
 
@@ -114,8 +127,22 @@ export async function verifyBillingEntitlementToken(token: string) {
     false,
     ["verify"],
   );
-  const { payload } = await compactVerify(token, verifier);
-  const parsed = JSON.parse(new TextDecoder().decode(payload)) as BillingEntitlementPayload;
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    throw new Error("Invalid entitlement token.");
+  }
+  const isValid = await crypto.subtle.verify(
+    { name: "ECDSA", hash: "SHA-256" },
+    verifier,
+    fromBase64Url(parts[2]),
+    new TextEncoder().encode(`${parts[0]}.${parts[1]}`),
+  );
+  if (!isValid) {
+    throw new Error("Invalid entitlement token.");
+  }
+  const parsed = JSON.parse(
+    new TextDecoder().decode(fromBase64Url(parts[1])),
+  ) as BillingEntitlementPayload;
   if (Date.parse(parsed.expires_at) <= Date.now()) {
     throw new Error("Entitlement token expired.");
   }
