@@ -99,3 +99,4 @@ echo "Roof Tape Measure restarted in the VS Code terminal and Safari refreshed a
 echo "Streaming dev server logs from $LOG_FILE"
 
 tail -f "$LOG_FILE"
+   
