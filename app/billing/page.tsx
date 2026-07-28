@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export default async function BillingRoute() {
   const plansResult = await Promise.allSettled([getStripeBillingPlans()]);
   const planLoad = plansResult[0];
-
+    
   return (
     <BillingScreen
       plans={planLoad.status === "fulfilled" ? planLoad.value : []}
