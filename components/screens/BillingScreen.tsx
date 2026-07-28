@@ -286,7 +286,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
           <Card style={{ display: "grid", gap: 8 }}>
             <strong>No billing plans are configured yet.</strong>
             <span style={{ color: "var(--muted)" }}>
-              Add `STRIPE_BILLING_PLANS_JSON` or `STRIPE_PRICE_ID_MONTHLY` in your Cloudflare variables or local env, then reload.
+              Add `STRIPE_BILLING_PLANS_JSON` in your Cloudflare variables or local env, then reload.
             </span>
           </Card>
         ) : (
