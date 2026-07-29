@@ -311,11 +311,11 @@ export function BillingScreen({ plans, planLoadError }: Props) {
                 <span className="chip">Billed per {plan.interval}</span>
               </div>
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                <Button onClick={() => void handleCheckout(plan.id)} disabled={busyAction !== null || loadingEntitlement}>
+                <Button type="button" onClick={() => void handleCheckout(plan.id)} disabled={busyAction !== null}>
                   {busyAction === plan.id ? <LoaderCircle size={18} /> : <CreditCard size={18} />}
                   Start Subscription
                 </Button>
-                <Button variant="secondary" onClick={() => void handlePortal()} disabled={busyAction !== null || loadingEntitlement}>
+                <Button type="button" variant="secondary" onClick={() => void handlePortal()} disabled={busyAction !== null}>
                   {busyAction === "portal" ? <LoaderCircle size={18} /> : <Settings2 size={18} />}
                   Manage Billing
                 </Button>
