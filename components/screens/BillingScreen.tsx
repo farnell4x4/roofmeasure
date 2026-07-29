@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import {
   clearStoredBillingEntitlement,
   getStoredBillingEntitlement,
+  refreshBillingEntitlement,
   refreshBillingEntitlementIfNeeded,
   saveBillingEntitlementToken,
 } from "@/lib/billing/entitlement-client";
@@ -77,8 +78,13 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleString();
 }
 
+function wait(milliseconds: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
 export function BillingScreen({ plans, planLoadError }: Props) {
   const searchParams = useSearchParams();
+  const checkoutSucceeded = searchParams.get("checkout") === "success";
   const { push } = useToast();
   const [email, setEmail] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -115,6 +121,34 @@ export function BillingScreen({ plans, planLoadError }: Props) {
         }
         setEntitlement(current?.payload ?? null);
         setEntitlementToken(current?.token ?? null);
+
+        if (checkoutSucceeded && current && !current.payload.subscription_active) {
+          addDebug("Checkout success detected; starting automatic entitlement refresh.");
+          setBusyAction("checkout-refresh");
+          try {
+            for (let attempt = 1; attempt <= 10; attempt += 1) {
+              await wait(2000);
+              if (cancelled) return;
+
+              addDebug(`Automatic entitlement refresh attempt ${attempt}/10.`);
+              const refreshed = await refreshBillingEntitlement(true);
+              if (!refreshed) {
+                addDebug("Automatic entitlement refresh found no stored token.");
+                continue;
+              }
+
+              setEntitlement(refreshed.payload);
+              setEntitlementToken(refreshed.token);
+              addDebug(`Automatic entitlement refresh result: active=${refreshed.payload.subscription_active}.`);
+              if (refreshed.payload.subscription_active) {
+                push({ title: "Paid access refreshed automatically.", tone: "success" });
+                break;
+              }
+            }
+          } finally {
+            if (!cancelled) setBusyAction(null);
+          }
+        }
       } catch (error) {
         addDebug(`Entitlement load failed: ${error instanceof Error ? error.message : String(error)}`);
       } finally {
@@ -129,7 +163,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [checkoutSucceeded, push]);
 
   const checkoutMessage = useMemo(() => {
     if (searchParams.get("paywall") === "project-limit") {

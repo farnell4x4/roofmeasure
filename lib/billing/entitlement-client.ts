@@ -67,9 +67,9 @@ export async function clearStoredBillingEntitlement() {
   await db.clearBillingEntitlement();
 }
 
-export async function refreshBillingEntitlementIfNeeded() {
+export async function refreshBillingEntitlement(force = false) {
   const current = await getStoredBillingEntitlement();
-  if (!current || !navigator.onLine || !isEntitlementRefreshDue(current.payload)) {
+  if (!current || !navigator.onLine || (!force && !isEntitlementRefreshDue(current.payload))) {
     return current;
   }
 
@@ -95,4 +95,8 @@ export async function refreshBillingEntitlementIfNeeded() {
     token: payload.entitlementToken,
     payload: nextPayload,
   };
+}
+
+export async function refreshBillingEntitlementIfNeeded() {
+  return refreshBillingEntitlement();
 }
