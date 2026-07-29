@@ -42,7 +42,7 @@ export async function getStripeEnv() {
     appUrl: env.NEXT_PUBLIC_APP_URL,
     secretKey: env.STRIPE_SECRET_KEY,
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
-    plansJson: env.STRIPE_BILLING_PLANS_JSON,
+    plansJson: env.STRIPE_BILLING_PLANS_TEST_JSON || env.STRIPE_BILLING_PLANS_JSON,
   };
 }
 

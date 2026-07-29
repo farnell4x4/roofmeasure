@@ -24,6 +24,7 @@ type RuntimeEnvKey =
   | "RESEND_API_KEY"
   | "STRIPE_SECRET_KEY"
   | "STRIPE_WEBHOOK_SECRET"
+  | "STRIPE_BILLING_PLANS_TEST_JSON"
   | "STRIPE_BILLING_PLANS_JSON";
 type RuntimeEnvSnapshot = Record<RuntimeEnvKey, string>;
 
@@ -93,6 +94,9 @@ function buildRuntimeEnvSnapshot(
     STRIPE_WEBHOOK_SECRET:
       readCloudflareEnvValue(cloudflareEnv, "STRIPE_WEBHOOK_SECRET") ||
       readProcessEnvValue("STRIPE_WEBHOOK_SECRET"),
+    STRIPE_BILLING_PLANS_TEST_JSON:
+      readCloudflareEnvValue(cloudflareEnv, "STRIPE_BILLING_PLANS_TEST_JSON") ||
+      readProcessEnvValue("STRIPE_BILLING_PLANS_TEST_JSON"),
     STRIPE_BILLING_PLANS_JSON:
       readCloudflareEnvValue(cloudflareEnv, "STRIPE_BILLING_PLANS_JSON") ||
       readProcessEnvValue("STRIPE_BILLING_PLANS_JSON")

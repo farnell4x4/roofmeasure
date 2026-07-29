@@ -24,6 +24,7 @@ describe("runtime env helpers", () => {
     delete process.env.RESEND_API_KEY;
     delete process.env.STRIPE_SECRET_KEY;
     delete process.env.STRIPE_WEBHOOK_SECRET;
+    delete process.env.STRIPE_BILLING_PLANS_TEST_JSON;
     delete process.env.STRIPE_BILLING_PLANS_JSON;
   });
 
@@ -43,6 +44,7 @@ describe("runtime env helpers", () => {
         RESEND_API_KEY: "re_test_cf",
         STRIPE_SECRET_KEY: "rk_test_cf",
         STRIPE_WEBHOOK_SECRET: "whsec_cf",
+        STRIPE_BILLING_PLANS_TEST_JSON: "[]",
         STRIPE_BILLING_PLANS_JSON: '[{"id":"starter","name":"Starter","description":"desc","priceId":"price_1","interval":"month"}]'
       }
     });
@@ -60,6 +62,7 @@ describe("runtime env helpers", () => {
     process.env.RESEND_API_KEY = "re_test_process";
     process.env.STRIPE_SECRET_KEY = "rk_test_process";
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_process";
+    process.env.STRIPE_BILLING_PLANS_TEST_JSON = "[]";
     process.env.STRIPE_BILLING_PLANS_JSON = "[]";
 
     const { getEnv } = await import("@/lib/config/env");
@@ -89,6 +92,7 @@ describe("runtime env helpers", () => {
     process.env.RESEND_API_KEY = "re_test_local";
     process.env.STRIPE_SECRET_KEY = "rk_test_local";
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_local";
+    process.env.STRIPE_BILLING_PLANS_TEST_JSON = "[]";
     process.env.STRIPE_BILLING_PLANS_JSON = "[]";
 
     const { getRuntimeEnvSnapshot } = await import("@/lib/config/env");
@@ -108,6 +112,7 @@ describe("runtime env helpers", () => {
       RESEND_API_KEY: "re_test_local",
       STRIPE_SECRET_KEY: "rk_test_local",
       STRIPE_WEBHOOK_SECRET: "whsec_local",
+      STRIPE_BILLING_PLANS_TEST_JSON: "[]",
       STRIPE_BILLING_PLANS_JSON: "[]"
     });
   });
