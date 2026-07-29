@@ -56,6 +56,9 @@ export async function getStripeClient() {
   if (!stripeClient) {
     stripeClient = new Stripe(env.secretKey, {
       apiVersion: "2026-06-24.dahlia",
+      httpClient: Stripe.createFetchHttpClient(),
+      timeout: 15_000,
+      maxNetworkRetries: 0,
     });
   }
 
