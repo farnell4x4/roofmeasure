@@ -30,7 +30,6 @@ npx wrangler secret put MAGIC_LINK_FROM_EMAIL
 npx wrangler secret put MAGIC_LINK_FROM_NAME
 npx wrangler secret put STRIPE_SECRET_KEY
 npx wrangler secret put STRIPE_WEBHOOK_SECRET
-npx wrangler secret put STRIPE_PORTAL_CONFIGURATION_ID
 npx wrangler secret put STRIPE_BILLING_PLANS_JSON
 ```
 
