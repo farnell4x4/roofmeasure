@@ -11,11 +11,27 @@ type StoredBillingEntitlement = {
   payload: BillingEntitlementPayload;
 };
 
+let runtimePublicKeyPromise: Promise<string> | null = null;
+
+async function getEntitlementPublicKey() {
+  const buildTimePublicKey = process.env.NEXT_PUBLIC_BILLING_ENTITLEMENT_PUBLIC_KEY;
+  if (buildTimePublicKey) return buildTimePublicKey;
+
+  runtimePublicKeyPromise ??= fetch("/api/auth/entitlement/public-key", {
+    cache: "no-store",
+  }).then(async (response) => {
+    const payload = (await response.json()) as { publicKey?: string; error?: string };
+    if (!response.ok || !payload.publicKey) {
+      throw new Error(payload.error || "Missing entitlement public key.");
+    }
+    return payload.publicKey;
+  });
+
+  return runtimePublicKeyPromise;
+}
+
 async function verifyEntitlementToken(token: string) {
-  const publicKeyPem = process.env.NEXT_PUBLIC_BILLING_ENTITLEMENT_PUBLIC_KEY;
-  if (!publicKeyPem) {
-    throw new Error("Missing NEXT_PUBLIC_BILLING_ENTITLEMENT_PUBLIC_KEY.");
-  }
+  const publicKeyPem = await getEntitlementPublicKey();
   const verifier = await importSPKI(publicKeyPem.replace(/\\n/g, "\n"), "ES256");
   const { payload } = await compactVerify(token, verifier);
   const parsed = JSON.parse(new TextDecoder().decode(payload)) as BillingEntitlementPayload;
