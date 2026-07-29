@@ -5,10 +5,10 @@
  * its map tiles, script, and search service require a connection.
  */
 const CACHE_PREFIX = "roofmeasure-shell";
-const CACHE_NAME = `${CACHE_PREFIX}-v3`;
-const RSC_CACHE_NAME = `${CACHE_PREFIX}-rsc-v3`;
+const CACHE_NAME = `${CACHE_PREFIX}-v4`;
+const RSC_CACHE_NAME = `${CACHE_PREFIX}-rsc-v4`;
 
-const APP_ROUTES = ["/", "/projects", "/image", "/report", "/settings"];
+const APP_ROUTES = ["/", "/projects", "/image", "/report", "/settings", "/billing"];
 const APP_ASSETS = [
   "/manifest.webmanifest",
   "/icon.svg",
