@@ -94,8 +94,8 @@ export async function POST(request: NextRequest) {
           plan_id: plan.id,
         },
       },
-      success_url: `${request.nextUrl.origin}/billing?checkout=success`,
-      cancel_url: `${request.nextUrl.origin}/billing?checkout=cancelled`,
+      success_url: `${request.nextUrl.origin}/subscription?checkout=success`,
+      cancel_url: `${request.nextUrl.origin}/subscription?checkout=cancelled`,
       integration_identifier: buildStripeCheckoutIntegrationIdentifier(),
     });
     logStage(requestId, "session-creation-completed", { sessionCreated: Boolean(session.id) });

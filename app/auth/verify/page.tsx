@@ -34,7 +34,7 @@ function VerifyMagicLinkContent() {
         }
         await saveBillingEntitlementToken(payload.entitlementToken);
         if (!cancelled) {
-          router.replace("/billing?magicLink=success");
+          router.replace("/subscription?magicLink=success");
         }
       } catch (error) {
         if (!cancelled) {

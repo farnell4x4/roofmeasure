@@ -2918,7 +2918,7 @@ function MapKitTestPage() {
                 type="button"
                 onClick={() => {
                   setIsMeasurementSettingsOpen(false)
-                  router.push("/billing")
+                  router.push("/subscription")
                 }}
                 style={{
                   border: 0,
