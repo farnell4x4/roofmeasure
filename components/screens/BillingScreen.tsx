@@ -30,23 +30,46 @@ type BillingDebugEntry = {
   message: string;
 };
 
-async function postJson<T>(url: string, body?: unknown, token?: string, onResponse?: (status: number) => void) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
+async function postJson<T>(
+  url: string,
+  body?: unknown,
+  token?: string,
+  onResponse?: (status: number) => void,
+  onWaiting?: (seconds: number) => void,
+) {
+  const controller = new AbortController();
+  const waitingTimers = [2, 10].map((seconds) =>
+    window.setTimeout(() => onWaiting?.(seconds), seconds * 1000),
+  );
+  const timeout = window.setTimeout(() => controller.abort(), 15_000);
 
-  onResponse?.(response.status);
-  const payload = (await response.json()) as T & { error?: string };
-  if (!response.ok) {
-    throw new Error(payload.error || "Request failed.");
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: controller.signal,
+    });
+
+    onResponse?.(response.status);
+    const payload = (await response.json()) as T & { error?: string };
+    if (!response.ok) {
+      throw new Error(payload.error || "Request failed.");
+    }
+
+    return payload;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`${url} did not respond within 15 seconds.`);
+    }
+    throw error;
+  } finally {
+    waitingTimers.forEach((timer) => window.clearTimeout(timer));
+    window.clearTimeout(timeout);
   }
-
-  return payload;
 }
 
 function formatDate(value: string | null) {
@@ -208,6 +231,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
         { planId },
         token,
         (status) => addDebug(`Checkout API response status=${status}.`),
+        (seconds) => addDebug(`Checkout fetch still waiting after ${seconds} seconds.`),
       );
       addDebug(`Checkout response received: url=${payload.url ? "present" : "missing"}.`);
       addDebug("Navigating to Stripe Checkout.");
@@ -241,6 +265,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
         undefined,
         token,
         (status) => addDebug(`Portal API response status=${status}.`),
+        (seconds) => addDebug(`Portal fetch still waiting after ${seconds} seconds.`),
       );
       addDebug(`Portal response received: url=${payload.url ? "present" : "missing"}.`);
       addDebug("Navigating to Stripe Billing Portal.");
