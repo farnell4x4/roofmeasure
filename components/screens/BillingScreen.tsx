@@ -56,6 +56,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
   const [entitlementToken, setEntitlementToken] = useState<string | null>(null);
   const [magicLinkPreviewUrl, setMagicLinkPreviewUrl] = useState<string | null>(null);
   const [loadingEntitlement, setLoadingEntitlement] = useState(true);
+  const [billingError, setBillingError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,6 +152,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
       return;
     }
     try {
+      setBillingError(null);
       setBusyAction(planId);
       const payload = await postJson<{ url: string }>(
         "/api/stripe/checkout",
@@ -159,6 +161,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
       );
       window.location.href = payload.url;
     } catch (error) {
+      setBillingError(error instanceof Error ? error.message : "Could not start checkout.");
       push({
         title: error instanceof Error ? error.message : "Could not start checkout.",
         tone: "danger",
@@ -174,6 +177,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
       return;
     }
     try {
+      setBillingError(null);
       setBusyAction("portal");
       const payload = await postJson<{ url: string }>(
         "/api/stripe/customer-portal",
@@ -182,6 +186,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
       );
       window.location.href = payload.url;
     } catch (error) {
+      setBillingError(error instanceof Error ? error.message : "Could not open billing portal.");
       push({
         title: error instanceof Error ? error.message : "Could not open billing portal.",
         tone: "danger",
@@ -213,6 +218,12 @@ export function BillingScreen({ plans, planLoadError }: Props) {
       {checkoutMessage ? (
         <Card style={{ borderColor: "rgba(65, 105, 225, 0.24)", background: "rgba(65, 105, 225, 0.08)" }}>
           {checkoutMessage}
+        </Card>
+      ) : null}
+
+      {billingError ? (
+        <Card style={{ borderColor: "rgba(166, 45, 39, 0.3)", background: "rgba(166, 45, 39, 0.08)", color: "#8c211d" }}>
+          {billingError}
         </Card>
       ) : null}
 
