@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   clearStoredBillingEntitlement,
+  getStoredBillingEntitlement,
   refreshBillingEntitlementIfNeeded,
   saveBillingEntitlementToken,
 } from "@/lib/billing/entitlement-client";
@@ -146,19 +147,30 @@ export function BillingScreen({ plans, planLoadError }: Props) {
     }
   }
 
+  async function getUsableEntitlementToken() {
+    if (entitlementToken) return entitlementToken;
+
+    const current = await getStoredBillingEntitlement();
+    if (!current) return null;
+
+    setEntitlement(current.payload);
+    setEntitlementToken(current.token);
+    return current.token;
+  }
+
   async function handleCheckout(planId: string) {
-    if (!entitlementToken) {
-      setBillingError("Sign in with a magic link first.");
-      push({ title: "Sign in with a magic link first.", tone: "default" });
-      return;
-    }
     try {
       setBillingError(null);
       setBusyAction(planId);
+      const token = await getUsableEntitlementToken();
+      if (!token) {
+        throw new Error("Sign in with a magic link first.");
+      }
+
       const payload = await postJson<{ url: string }>(
         "/api/stripe/checkout",
         { planId },
-        entitlementToken,
+        token,
       );
       window.location.href = payload.url;
     } catch (error) {
@@ -173,18 +185,18 @@ export function BillingScreen({ plans, planLoadError }: Props) {
   }
 
   async function handlePortal() {
-    if (!entitlementToken) {
-      setBillingError("Sign in with a magic link first.");
-      push({ title: "Sign in with a magic link first.", tone: "default" });
-      return;
-    }
     try {
       setBillingError(null);
       setBusyAction("portal");
+      const token = await getUsableEntitlementToken();
+      if (!token) {
+        throw new Error("Sign in with a magic link first.");
+      }
+
       const payload = await postJson<{ url: string }>(
         "/api/stripe/customer-portal",
         undefined,
-        entitlementToken,
+        token,
       );
       window.location.href = payload.url;
     } catch (error) {
