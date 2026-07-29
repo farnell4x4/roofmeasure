@@ -148,6 +148,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
 
   async function handleCheckout(planId: string) {
     if (!entitlementToken) {
+      setBillingError("Sign in with a magic link first.");
       push({ title: "Sign in with a magic link first.", tone: "default" });
       return;
     }
@@ -173,6 +174,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
 
   async function handlePortal() {
     if (!entitlementToken) {
+      setBillingError("Sign in with a magic link first.");
       push({ title: "Sign in with a magic link first.", tone: "default" });
       return;
     }
@@ -309,11 +311,11 @@ export function BillingScreen({ plans, planLoadError }: Props) {
                 <span className="chip">Billed per {plan.interval}</span>
               </div>
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                <Button onClick={() => void handleCheckout(plan.id)} disabled={busyAction !== null || !entitlementToken}>
+                <Button onClick={() => void handleCheckout(plan.id)} disabled={busyAction !== null || loadingEntitlement}>
                   {busyAction === plan.id ? <LoaderCircle size={18} /> : <CreditCard size={18} />}
                   Start Subscription
                 </Button>
-                <Button variant="secondary" onClick={() => void handlePortal()} disabled={busyAction !== null || !entitlementToken}>
+                <Button variant="secondary" onClick={() => void handlePortal()} disabled={busyAction !== null || loadingEntitlement}>
                   {busyAction === "portal" ? <LoaderCircle size={18} /> : <Settings2 size={18} />}
                   Manage Billing
                 </Button>
