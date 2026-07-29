@@ -40,6 +40,7 @@ function mapBillingUser(row: BillingUserRow): BillingUser {
     subscriptionId: row.subscription_id,
     subscriptionStatus: row.subscription_status,
     currentPeriodEnd: row.current_period_end,
+    subscriptionCancelAt: null,
     updatedAt: row.updated_at,
   };
 }

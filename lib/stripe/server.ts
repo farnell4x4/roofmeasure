@@ -160,7 +160,15 @@ export async function refreshBillingUserFromStripe(user: BillingUser) {
     currentPeriodEnd: toIsoString(subscription ? getSubscriptionCurrentPeriodEnd(subscription) : null),
   });
 
-  return repository.getUserById(user.userId);
+  const refreshedUser = await repository.getUserById(user.userId);
+  if (!refreshedUser) return null;
+
+  return {
+    ...refreshedUser,
+    subscriptionCancelAt: subscription?.cancel_at_period_end
+      ? toIsoString(subscription.cancel_at) ?? toIsoString(getSubscriptionCurrentPeriodEnd(subscription))
+      : null,
+  };
 }
 
 export async function syncBillingUserFromStripeSubscription(options: {
@@ -233,6 +241,7 @@ export async function createBillingEntitlementForUser(user: BillingUser) {
     user_id: refreshedUser.userId,
     email: refreshedUser.email,
     subscription_active: hasBillingAccess(refreshedUser.subscriptionStatus),
+    subscription_cancel_at: refreshedUser.subscriptionCancelAt,
     plan,
   });
 }

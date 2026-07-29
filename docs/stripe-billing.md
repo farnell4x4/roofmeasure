@@ -84,6 +84,6 @@ Recommended test cases:
 
 - D1 stores only `user_id`, `email`, `stripe_customer_id`, `subscription_id`, `subscription_status`, `current_period_end`, and `updated_at`, plus short-lived magic-link records.
 - Local IndexedDB project storage remains unchanged.
-- The entitlement token contains only `user_id`, `subscription_active`, `plan`, `issued_at`, and `expires_at`.
+- The entitlement token contains only `user_id`, `email`, `subscription_active`, `subscription_cancel_at`, `plan`, `issued_at`, and `expires_at`.
 - Subscription access is granted only for `active` and `trialing` server-recorded Stripe states.
 - The app refreshes the locally stored entitlement periodically when online instead of querying D1 or Stripe on every unlock check.

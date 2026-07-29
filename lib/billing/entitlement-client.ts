@@ -69,8 +69,11 @@ export async function clearStoredBillingEntitlement() {
 
 export async function refreshBillingEntitlement(force = false) {
   const current = await getStoredBillingEntitlement();
-  const needsIdentityRefresh = Boolean(current && !current.payload.email);
-  if (!current || !navigator.onLine || (!force && !needsIdentityRefresh && !isEntitlementRefreshDue(current.payload))) {
+  const needsEntitlementShapeRefresh = Boolean(
+    current &&
+      (!current.payload.email || !("subscription_cancel_at" in current.payload)),
+  );
+  if (!current || !navigator.onLine || (!force && !needsEntitlementShapeRefresh && !isEntitlementRefreshDue(current.payload))) {
     return current;
   }
 

@@ -16,6 +16,7 @@ export type BillingUser = {
   subscriptionId: string | null;
   subscriptionStatus: StripeSubscriptionStatus;
   currentPeriodEnd: string | null;
+  subscriptionCancelAt: string | null;
   updatedAt: string;
 };
 
@@ -32,6 +33,7 @@ export type BillingEntitlementPayload = {
   user_id: string;
   email: string;
   subscription_active: boolean;
+  subscription_cancel_at: string | null;
   plan: string | null;
   issued_at: string;
   expires_at: string;

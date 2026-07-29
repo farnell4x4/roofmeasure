@@ -85,6 +85,7 @@ function wait(milliseconds: number) {
 export function BillingScreen({ plans, planLoadError }: Props) {
   const searchParams = useSearchParams();
   const checkoutSucceeded = searchParams.get("checkout") === "success";
+  const returnedFromPortal = searchParams.get("billing") === "returned";
   const { push } = useToast();
   const [email, setEmail] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -109,7 +110,9 @@ export function BillingScreen({ plans, planLoadError }: Props) {
     async function loadEntitlement() {
       addDebug("Entitlement load started.");
       try {
-        const current = await refreshBillingEntitlementIfNeeded();
+        const current = returnedFromPortal
+          ? await refreshBillingEntitlement(true)
+          : await refreshBillingEntitlementIfNeeded();
         addDebug(
           current
             ? `Entitlement load found a token; active=${current.payload.subscription_active}.`
@@ -165,7 +168,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [checkoutSucceeded, push]);
+  }, [checkoutSucceeded, push, returnedFromPortal]);
 
   const checkoutMessage = useMemo(() => {
     if (searchParams.get("paywall") === "project-limit") {
@@ -412,6 +415,11 @@ export function BillingScreen({ plans, planLoadError }: Props) {
           <div style={{ display: "grid", gap: 6, color: "var(--muted)", fontSize: 14 }}>
             <span>User ID: {entitlement.user_id}</span>
             <span>Plan: {entitlement.plan ?? "none"}</span>
+            {entitlement.subscription_cancel_at ? (
+              <strong style={{ color: "var(--danger)" }}>
+                Canceled. Active until {formatDate(entitlement.subscription_cancel_at)}.
+              </strong>
+            ) : null}
             <span>Issued: {formatDate(entitlement.issued_at)}</span>
             <span>Expires: {formatDate(entitlement.expires_at)}</span>
           </div>
