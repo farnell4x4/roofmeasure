@@ -25,7 +25,12 @@ type RefreshPayload = {
   entitlementToken: string;
 };
 
-async function postJson<T>(url: string, body?: unknown, token?: string) {
+type BillingDebugEntry = {
+  time: string;
+  message: string;
+};
+
+async function postJson<T>(url: string, body?: unknown, token?: string, onResponse?: (status: number) => void) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -35,6 +40,7 @@ async function postJson<T>(url: string, body?: unknown, token?: string) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
+  onResponse?.(response.status);
   const payload = (await response.json()) as T & { error?: string };
   if (!response.ok) {
     throw new Error(payload.error || "Request failed.");
@@ -58,19 +64,40 @@ export function BillingScreen({ plans, planLoadError }: Props) {
   const [magicLinkPreviewUrl, setMagicLinkPreviewUrl] = useState<string | null>(null);
   const [loadingEntitlement, setLoadingEntitlement] = useState(true);
   const [billingError, setBillingError] = useState<string | null>(null);
+  const [debugEntries, setDebugEntries] = useState<BillingDebugEntry[]>([]);
+
+  function addDebug(message: string) {
+    setDebugEntries((current) => [
+      ...current.slice(-39),
+      { time: new Date().toISOString(), message },
+    ]);
+  }
 
   useEffect(() => {
     let cancelled = false;
+    addDebug("Billing screen mounted.");
 
     async function loadEntitlement() {
+      addDebug("Entitlement load started.");
       try {
         const current = await refreshBillingEntitlementIfNeeded();
-        if (cancelled) return;
+        addDebug(
+          current
+            ? `Entitlement load found a token; active=${current.payload.subscription_active}.`
+            : "Entitlement load found no stored token.",
+        );
+        if (cancelled) {
+          addDebug("Entitlement load completed after unmount; ignoring result.");
+          return;
+        }
         setEntitlement(current?.payload ?? null);
         setEntitlementToken(current?.token ?? null);
+      } catch (error) {
+        addDebug(`Entitlement load failed: ${error instanceof Error ? error.message : String(error)}`);
       } finally {
         if (!cancelled) {
           setLoadingEntitlement(false);
+          addDebug("Entitlement loading state set to complete.");
         }
       }
     }
@@ -148,32 +175,45 @@ export function BillingScreen({ plans, planLoadError }: Props) {
   }
 
   async function getUsableEntitlementToken() {
+    addDebug(`Button token check: state token=${entitlementToken ? "present" : "missing"}.`);
     if (entitlementToken) return entitlementToken;
 
+    addDebug("Button token check: reading IndexedDB entitlement.");
     const current = await getStoredBillingEntitlement();
-    if (!current) return null;
+    if (!current) {
+      addDebug("Button token check: IndexedDB returned no usable entitlement.");
+      return null;
+    }
 
     setEntitlement(current.payload);
     setEntitlementToken(current.token);
+    addDebug(`Button token check: recovered token; active=${current.payload.subscription_active}.`);
     return current.token;
   }
 
   async function handleCheckout(planId: string) {
+    addDebug(`Start Subscription clicked: plan=${planId}.`);
     try {
       setBillingError(null);
       setBusyAction(planId);
       const token = await getUsableEntitlementToken();
       if (!token) {
+        addDebug("Start Subscription stopped: no entitlement token.");
         throw new Error("Sign in with a magic link first.");
       }
 
+      addDebug("Start Subscription sending POST /api/stripe/checkout.");
       const payload = await postJson<{ url: string }>(
         "/api/stripe/checkout",
         { planId },
         token,
+        (status) => addDebug(`Checkout API response status=${status}.`),
       );
+      addDebug(`Checkout response received: url=${payload.url ? "present" : "missing"}.`);
+      addDebug("Navigating to Stripe Checkout.");
       window.location.href = payload.url;
     } catch (error) {
+      addDebug(`Start Subscription failed: ${error instanceof Error ? error.message : String(error)}`);
       setBillingError(error instanceof Error ? error.message : "Could not start checkout.");
       push({
         title: error instanceof Error ? error.message : "Could not start checkout.",
@@ -185,21 +225,28 @@ export function BillingScreen({ plans, planLoadError }: Props) {
   }
 
   async function handlePortal() {
+    addDebug("Manage Billing clicked.");
     try {
       setBillingError(null);
       setBusyAction("portal");
       const token = await getUsableEntitlementToken();
       if (!token) {
+        addDebug("Manage Billing stopped: no entitlement token.");
         throw new Error("Sign in with a magic link first.");
       }
 
+      addDebug("Manage Billing sending POST /api/stripe/customer-portal.");
       const payload = await postJson<{ url: string }>(
         "/api/stripe/customer-portal",
         undefined,
         token,
+        (status) => addDebug(`Portal API response status=${status}.`),
       );
+      addDebug(`Portal response received: url=${payload.url ? "present" : "missing"}.`);
+      addDebug("Navigating to Stripe Billing Portal.");
       window.location.href = payload.url;
     } catch (error) {
+      addDebug(`Manage Billing failed: ${error instanceof Error ? error.message : String(error)}`);
       setBillingError(error instanceof Error ? error.message : "Could not open billing portal.");
       push({
         title: error instanceof Error ? error.message : "Could not open billing portal.",
@@ -336,6 +383,33 @@ export function BillingScreen({ plans, planLoadError }: Props) {
           ))
         )}
       </section>
+
+      <Card style={{ display: "grid", gap: 10 }}>
+        <strong>Billing diagnostics</strong>
+        <span style={{ color: "var(--muted)", fontSize: 14 }}>
+          Safe UI trace: token values are never displayed. Reproduce the issue, then copy this log.
+        </span>
+        <pre
+          style={{
+            margin: 0,
+            padding: 12,
+            overflowX: "auto",
+            whiteSpace: "pre-wrap",
+            fontSize: 12,
+            lineHeight: 1.5,
+            background: "var(--surface-strong)",
+            borderRadius: 12,
+            userSelect: "text",
+          }}
+        >
+          {debugEntries.length > 0
+            ? debugEntries.map((entry) => `${entry.time} ${entry.message}`).join("\n")
+            : "No billing events recorded yet."}
+        </pre>
+        <span style={{ color: "var(--muted)", fontSize: 12 }}>
+          Current state: loading={String(loadingEntitlement)}, stateToken={entitlementToken ? "present" : "missing"}, busyAction={busyAction ?? "none"}, plans={plans.length}
+        </span>
+      </Card>
     </main>
   );
 }
