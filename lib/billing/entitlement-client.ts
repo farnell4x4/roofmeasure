@@ -69,7 +69,8 @@ export async function clearStoredBillingEntitlement() {
 
 export async function refreshBillingEntitlement(force = false) {
   const current = await getStoredBillingEntitlement();
-  if (!current || !navigator.onLine || (!force && !isEntitlementRefreshDue(current.payload))) {
+  const needsIdentityRefresh = Boolean(current && !current.payload.email);
+  if (!current || !navigator.onLine || (!force && !needsIdentityRefresh && !isEntitlementRefreshDue(current.payload))) {
     return current;
   }
 

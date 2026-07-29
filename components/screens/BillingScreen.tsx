@@ -121,6 +121,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
         }
         setEntitlement(current?.payload ?? null);
         setEntitlementToken(current?.token ?? null);
+        setEmail(current?.payload.email ?? "");
 
         if (checkoutSucceeded && current && !current.payload.subscription_active) {
           addDebug("Checkout success detected; starting automatic entitlement refresh.");
@@ -139,6 +140,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
 
               setEntitlement(refreshed.payload);
               setEntitlementToken(refreshed.token);
+              setEmail(refreshed.payload.email);
               addDebug(`Automatic entitlement refresh result: active=${refreshed.payload.subscription_active}.`);
               if (refreshed.payload.subscription_active) {
                 push({ title: "Paid access refreshed automatically.", tone: "success" });
@@ -220,6 +222,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
         const refreshed = await saveBillingEntitlementToken(payload.entitlementToken);
         setEntitlement(refreshed);
         setEntitlementToken(payload.entitlementToken);
+        setEmail(refreshed.email);
       }
     } catch (error) {
       push({
@@ -244,6 +247,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
 
     setEntitlement(current.payload);
     setEntitlementToken(current.token);
+    setEmail(current.payload.email ?? "");
     addDebug(`Button token check: recovered token; active=${current.payload.subscription_active}.`);
     return current.token;
   }
@@ -318,9 +322,10 @@ export function BillingScreen({ plans, planLoadError }: Props) {
 
   async function handleSignOut() {
     await clearStoredBillingEntitlement();
+    setEmail("");
     setEntitlement(null);
     setEntitlementToken(null);
-    push({ title: "Local entitlement cleared on this device.", tone: "success" });
+    push({ title: "Signed out on this device.", tone: "success" });
   }
 
   const statusLabel = entitlement?.subscription_active ? "active" : "inactive";
@@ -350,6 +355,14 @@ export function BillingScreen({ plans, planLoadError }: Props) {
       ) : null}
 
       <Card style={{ display: "grid", gap: 16 }}>
+        {entitlement?.email ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ color: "var(--muted)" }}>Signed in as <strong style={{ color: "var(--ink)" }}>{entitlement.email}</strong></span>
+            <Button variant="ghost" onClick={() => void handleSignOut()} disabled={busyAction !== null}>
+              <ShieldX size={18} /> Sign Out
+            </Button>
+          </div>
+        ) : null}
         <Input
           id="billing-email"
           type="email"
@@ -369,9 +382,11 @@ export function BillingScreen({ plans, planLoadError }: Props) {
             {busyAction === "refresh" ? <LoaderCircle size={18} /> : <ShieldCheck size={18} />}
             Refresh Entitlement
           </Button>
-          <Button variant="ghost" onClick={() => void handleSignOut()} disabled={busyAction !== null || !entitlementToken}>
-            <ShieldX size={18} /> Clear Local Access
-          </Button>
+          {!entitlement?.email ? (
+            <Button variant="ghost" onClick={() => void handleSignOut()} disabled={busyAction !== null || !entitlementToken}>
+              <ShieldX size={18} /> Sign Out
+            </Button>
+          ) : null}
         </div>
         {magicLinkPreviewUrl ? (
           <Card style={{ padding: 14, borderRadius: 16, background: "rgba(65, 105, 225, 0.06)" }}>

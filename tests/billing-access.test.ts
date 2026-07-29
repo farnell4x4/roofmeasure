@@ -18,6 +18,7 @@ describe("billing access helpers", () => {
     expect(
       isEntitlementRefreshDue({
         user_id: "user-1",
+        email: "example@example.com",
         subscription_active: true,
         plan: "pro",
         issued_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),

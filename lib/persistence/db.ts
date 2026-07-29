@@ -21,6 +21,7 @@ type BillingEntitlementRecord = {
   token: string
   payload: {
     user_id: string
+    email: string
     subscription_active: boolean
     plan: string | null
     issued_at: string

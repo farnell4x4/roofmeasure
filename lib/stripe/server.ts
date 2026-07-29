@@ -231,6 +231,7 @@ export async function createBillingEntitlementForUser(user: BillingUser) {
 
   return createBillingEntitlementToken({
     user_id: refreshedUser.userId,
+    email: refreshedUser.email,
     subscription_active: hasBillingAccess(refreshedUser.subscriptionStatus),
     plan,
   });
