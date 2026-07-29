@@ -2918,6 +2918,23 @@ function MapKitTestPage() {
                 type="button"
                 onClick={() => {
                   setIsMeasurementSettingsOpen(false)
+                  router.push("/billing")
+                }}
+                style={{
+                  border: 0,
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  background: "rgba(31, 37, 34, 0.08)",
+                  color: "#1f2522",
+                  cursor: "pointer",
+                }}
+              >
+                Manage Subscription
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMeasurementSettingsOpen(false)
                   setTutorialReplayVersion((current) => current + 1)
                 }}
                 style={{

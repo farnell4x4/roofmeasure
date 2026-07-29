@@ -329,9 +329,11 @@ export function BillingScreen({ plans, planLoadError }: Props) {
     <main className="app-shell page-grid">
       <div>
         <p className="chip">Stripe Billing</p>
-        <h1>Subscriptions</h1>
+        <h1>Manage Subscription</h1>
         <p style={{ color: "var(--muted)", margin: 0 }}>
-          Sign in by email, keep the signed 30-day entitlement in IndexedDB, and let Stripe webhooks update the tiny D1 billing record.
+          {entitlement?.subscription_active
+            ? "Manage your active subscription through Stripe, including cancellation and payment details."
+            : "Subscribe to unlock paid access. Your subscription is managed securely through Stripe."}
         </p>
       </div>
 
@@ -429,14 +431,22 @@ export function BillingScreen({ plans, planLoadError }: Props) {
                 <span className="chip">Billed per {plan.interval}</span>
               </div>
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                <Button type="button" onClick={() => void handleCheckout(plan.id)} disabled={busyAction !== null}>
-                  {busyAction === plan.id ? <LoaderCircle size={18} /> : <CreditCard size={18} />}
-                  Start Subscription
-                </Button>
-                <Button type="button" variant="secondary" onClick={() => void handlePortal()} disabled={busyAction !== null}>
-                  {busyAction === "portal" ? <LoaderCircle size={18} /> : <Settings2 size={18} />}
-                  Manage Billing
-                </Button>
+                {entitlement?.subscription_active ? (
+                  <span style={{ color: "var(--muted)", alignSelf: "center", fontSize: 14 }}>
+                    You have an active subscription.
+                  </span>
+                ) : (
+                  <Button type="button" onClick={() => void handleCheckout(plan.id)} disabled={busyAction !== null}>
+                    {busyAction === plan.id ? <LoaderCircle size={18} /> : <CreditCard size={18} />}
+                    Subscribe
+                  </Button>
+                )}
+                {entitlement?.subscription_active ? (
+                  <Button type="button" variant="secondary" onClick={() => void handlePortal()} disabled={busyAction !== null}>
+                    {busyAction === "portal" ? <LoaderCircle size={18} /> : <Settings2 size={18} />}
+                    Cancel Subscription
+                  </Button>
+                ) : null}
               </div>
             </Card>
           ))
