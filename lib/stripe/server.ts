@@ -165,8 +165,11 @@ export async function refreshBillingUserFromStripe(user: BillingUser) {
 
   return {
     ...refreshedUser,
-    subscriptionCancelAt: subscription?.cancel_at_period_end
-      ? toIsoString(subscription.cancel_at) ?? toIsoString(getSubscriptionCurrentPeriodEnd(subscription))
+    subscriptionCancelAt: subscription
+      ? toIsoString(subscription.cancel_at) ??
+        (subscription.cancel_at_period_end
+          ? toIsoString(getSubscriptionCurrentPeriodEnd(subscription))
+          : null)
       : null,
   };
 }
