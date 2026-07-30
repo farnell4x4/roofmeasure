@@ -1,19 +1,19 @@
 "use client"
 
-import { FileImage, FileText, FolderOpen, MapPinned, Trash2 } from "lucide-react"
+import { FileText, FolderOpen, Trash2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/Button"
 import { Card } from "@/components/ui/Card"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { Input } from "@/components/ui/Input"
+import { AppNavigation } from "@/components/app/AppNavigation"
 import { useToast } from "@/components/ui/ToastProvider"
 import { db } from "@/lib/persistence/db"
 import { formatArea } from "@/lib/measurement/units"
 import { calculateProjectTotals } from "@/lib/measurement/calculations"
 import { useProjects } from "@/hooks/useProjects"
 import { appendPersistenceDebugNote } from "@/lib/debug/persistence-debug"
-import { canCreateLocalProject, LOCAL_PROJECT_LIMIT_MESSAGE } from "@/lib/billing/local-access"
 import type { ImageProjectListItem } from "@/types/image-projects"
 
 export function ProjectsScreen() {
@@ -42,15 +42,6 @@ export function ProjectsScreen() {
 
   async function refreshAllProjects() {
     await Promise.all([refresh(), db.listImageProjects().then(setImageProjects)])
-  }
-
-  async function startNewProject(path: "/?new=1" | "/image?new=1") {
-    if (!(await canCreateLocalProject())) {
-      push({ title: LOCAL_PROJECT_LIMIT_MESSAGE, tone: "default" })
-      router.push("/billing?paywall=project-limit")
-      return
-    }
-    router.push(path)
   }
 
   const filtered = useMemo(() => {
@@ -104,6 +95,7 @@ export function ProjectsScreen() {
 
   return (
     <main className="app-shell page-grid projects-screen">
+      <AppNavigation />
       <section className="projects-screen__header">
         <div className="projects-screen__intro">
           <h1 style={{ marginBottom: 8 }}>Local projects and reports</h1>
@@ -111,14 +103,6 @@ export function ProjectsScreen() {
             Search, sort, view a report, or reopen any locally stored roof
             measurement project.
           </p>
-        </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Button onClick={() => void startNewProject("/?new=1")}>
-            <MapPinned size={18} /> New Map Project
-          </Button>
-          <Button variant="secondary" onClick={() => void startNewProject("/image?new=1")}>
-            <FileImage size={18} /> Upload Roof Image
-          </Button>
         </div>
       </section>
 
@@ -157,8 +141,6 @@ export function ProjectsScreen() {
         <EmptyState
           title="No saved projects yet"
           description="Search an address from the measuring screen to create a saved local project. Imported projects also appear here."
-          actionLabel="Start New Project"
-          onAction={() => void startNewProject("/image?new=1")}
         />
       ) : null}
 

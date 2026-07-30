@@ -2856,25 +2856,44 @@ function MapKitTestPage() {
               style={{ flex: 1, minWidth: 0, accentColor: "#1f2522" }}
             />
           </label> : null}
-          <button
-            type="button"
-            onClick={() => setIsMeasurementSettingsOpen((current) => !current)}
-            style={{
-              border: "1px solid rgba(31, 37, 34, 0.12)",
-              background: "rgba(255, 255, 255, 0.94)",
-              color: "#1f2522",
-              borderRadius: 999,
-              padding: "8px 12px",
-              fontSize: 13,
-              fontWeight: 600,
-              boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)",
-              cursor: "pointer",
-            }}
-          >
-            Options
-          </button>
-          {isMeasurementSettingsOpen ? (
-            <div
+          <div className="home-options-navigation__desktop">
+            <button type="button" className="home-navigation-pill" onClick={() => imageUploadInputRef.current?.click()}>
+              Upload Image
+            </button>
+            <button type="button" className="home-navigation-pill" onClick={() => router.push("/projects")}>
+              Projects
+            </button>
+            <button type="button" className="home-navigation-pill" onClick={() => router.push("/subscription")}>
+              Manage Subscription
+            </button>
+            <button
+              type="button"
+              className="home-navigation-pill"
+              onClick={() => setTutorialReplayVersion((current) => current + 1)}
+            >
+              Tutorial
+            </button>
+          </div>
+          <div className="home-options-navigation__mobile">
+            <button
+              type="button"
+              onClick={() => setIsMeasurementSettingsOpen((current) => !current)}
+              style={{
+                border: "1px solid rgba(31, 37, 34, 0.12)",
+                background: "rgba(255, 255, 255, 0.94)",
+                color: "#1f2522",
+                borderRadius: 999,
+                padding: "8px 12px",
+                fontSize: 13,
+                fontWeight: 600,
+                boxShadow: "0 10px 24px rgba(20, 24, 22, 0.12)",
+                cursor: "pointer",
+              }}
+            >
+              Options
+            </button>
+            {isMeasurementSettingsOpen ? (
+              <div
               style={{
                 display: "grid",
                 gap: 8,
@@ -2948,8 +2967,9 @@ function MapKitTestPage() {
               >
                 Tutorial
               </button>
-            </div>
-          ) : null}
+              </div>
+            ) : null}
+          </div>
         </div>
         {suggestions.length > 0 ? (
           <div

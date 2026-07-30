@@ -1,8 +1,8 @@
 "use client";
 
-import { CreditCard, FolderOpen, Home, LoaderCircle, Mail, MapPinned, Menu, Settings2, ShieldCheck, ShieldX, X } from "lucide-react";
+import { CreditCard, LoaderCircle, Mail, Settings2, ShieldCheck, ShieldX } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   clearStoredBillingEntitlement,
   getStoredBillingEntitlement,
@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/ToastProvider";
-import { canCreateLocalProject, LOCAL_PROJECT_LIMIT_MESSAGE } from "@/lib/billing/local-access";
+import { AppNavigation } from "@/components/app/AppNavigation";
 import type { BillingEntitlementPayload } from "@/types/billing";
 import type { StripeBillingPlan } from "@/lib/stripe/server";
 
@@ -84,7 +84,6 @@ function wait(milliseconds: number) {
 }
 
 export function BillingScreen({ plans, planLoadError }: Props) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const checkoutSucceeded = searchParams.get("checkout") === "success";
   const returnedFromPortal = searchParams.get("billing") === "returned";
@@ -97,21 +96,6 @@ export function BillingScreen({ plans, planLoadError }: Props) {
   const [loadingEntitlement, setLoadingEntitlement] = useState(true);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [debugEntries, setDebugEntries] = useState<BillingDebugEntry[]>([]);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  function navigateFromSubscription(path: "/" | "/projects" | "/?new=1") {
-    setMobileMenuOpen(false);
-    router.push(path);
-  }
-
-  async function handleNewProject() {
-    if (!(await canCreateLocalProject())) {
-      setMobileMenuOpen(false);
-      push({ title: LOCAL_PROJECT_LIMIT_MESSAGE, tone: "default" });
-      return;
-    }
-    navigateFromSubscription("/?new=1");
-  }
 
   function addDebug(message: string) {
     setDebugEntries((current) => [
@@ -352,42 +336,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
 
   return (
     <main className="app-shell page-grid">
-      <nav className="subscription-navigation" aria-label="Subscription navigation">
-        <div className="subscription-navigation__desktop">
-          <Button variant="ghost" onClick={() => navigateFromSubscription("/")}>
-            <Home size={18} /> Home
-          </Button>
-          <Button variant="ghost" onClick={() => navigateFromSubscription("/projects")}>
-            <FolderOpen size={18} /> Saved Projects
-          </Button>
-          <Button variant="ghost" onClick={() => void handleNewProject()}>
-            <MapPinned size={18} /> New Project
-          </Button>
-        </div>
-        <div className="subscription-navigation__mobile">
-          <Button
-            variant="ghost"
-            aria-expanded={mobileMenuOpen}
-            aria-controls="subscription-mobile-menu"
-            onClick={() => setMobileMenuOpen((current) => !current)}
-          >
-            {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />} Menu
-          </Button>
-          {mobileMenuOpen ? (
-            <div id="subscription-mobile-menu" className="subscription-navigation__menu">
-              <Button variant="ghost" onClick={() => navigateFromSubscription("/")}>
-                <Home size={18} /> Home
-              </Button>
-              <Button variant="ghost" onClick={() => navigateFromSubscription("/projects")}>
-                <FolderOpen size={18} /> Saved Projects
-              </Button>
-              <Button variant="ghost" onClick={() => void handleNewProject()}>
-                <MapPinned size={18} /> New Project
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      </nav>
+      <AppNavigation />
       <div>
         <h1>Manage Subscription</h1>
         <p style={{ color: "var(--muted)", margin: 0 }}>

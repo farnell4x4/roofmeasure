@@ -165,6 +165,39 @@ img {
   }
 }
 
+.home-options-navigation__desktop {
+  display: none;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.home-navigation-pill {
+  border: 1px solid rgba(31, 37, 34, 0.12);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #1f2522;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 10px 24px rgba(20, 24, 22, 0.12);
+}
+
+.home-options-navigation__mobile {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+@media (min-width: 701px) {
+  .home-options-navigation__desktop {
+    display: flex;
+  }
+
+  .home-options-navigation__mobile {
+    display: none;
+  }
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
