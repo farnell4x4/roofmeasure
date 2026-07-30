@@ -2699,7 +2699,7 @@ function MapKitTestPage() {
           top: 16,
           left: 16,
           zIndex: 3,
-          width: "min(420px, calc(100vw - 32px))",
+          width: "min(1000px, calc(100vw - 32px))",
           display: "grid",
           gap: 8,
         }}
@@ -2788,38 +2788,40 @@ function MapKitTestPage() {
             ) : null}
           </div>
         ) : null}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "12px 14px",
-            borderRadius: 18,
-            background: "rgba(255, 255, 255, 0.92)",
-            border: "1px solid rgba(31, 37, 34, 0.12)",
-            boxShadow: "0 14px 50px rgba(20, 24, 22, 0.16)",
-          }}
-        >
-          <Search size={18} color="#5f685f" />
-          <input
-            aria-label="Search address"
-            value={query}
-            onChange={(event) => {
-              setSuppressSuggestionsUntilTyping(false)
-              setQuery(event.target.value)
-            }}
-            placeholder="Search street address"
+        <div className="home-search-controls">
+          <div
+            className="home-search-field"
             style={{
-              flex: 1,
-              border: 0,
-              outline: "none",
-              background: "transparent",
-              color: "#1f2522",
-              fontSize: 16,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "12px 14px",
+              borderRadius: 18,
+              background: "rgba(255, 255, 255, 0.92)",
+              border: "1px solid rgba(31, 37, 34, 0.12)",
+              boxShadow: "0 14px 50px rgba(20, 24, 22, 0.16)",
             }}
-          />
-        </div>
-        <div style={{ display: "grid", justifyItems: "start", gap: 4 }}>
+          >
+            <Search size={18} color="#5f685f" />
+            <input
+              aria-label="Search address"
+              value={query}
+              onChange={(event) => {
+                setSuppressSuggestionsUntilTyping(false)
+                setQuery(event.target.value)
+              }}
+              placeholder="Search street address"
+              style={{
+                flex: 1,
+                border: 0,
+                outline: "none",
+                background: "transparent",
+                color: "#1f2522",
+                fontSize: 16,
+              }}
+            />
+          </div>
+        <div className="home-options-control" style={{ display: "grid", justifyItems: "start", gap: 4 }}>
           {isSatelliteMapActive ? <label
             style={{
               display: "flex",
@@ -2970,6 +2972,7 @@ function MapKitTestPage() {
               </div>
             ) : null}
           </div>
+        </div>
         </div>
         {suggestions.length > 0 ? (
           <div

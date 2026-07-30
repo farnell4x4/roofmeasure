@@ -171,6 +171,21 @@ img {
   flex-wrap: wrap;
 }
 
+.home-search-controls {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.home-search-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.home-options-control {
+  flex: 0 0 auto;
+}
+
 .home-navigation-pill {
   border: 1px solid rgba(31, 37, 34, 0.12);
   border-radius: 999px;
@@ -195,6 +210,12 @@ img {
 
   .home-options-navigation__mobile {
     display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .home-search-controls {
+    display: grid;
   }
 }
 
