@@ -124,6 +124,47 @@ img {
   background: var(--surface-muted);
 }
 
+.subscription-navigation__desktop {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.subscription-navigation__desktop > button {
+  flex: 1;
+  justify-content: center;
+}
+
+.subscription-navigation__mobile {
+  display: none;
+}
+
+.subscription-navigation__menu {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--stroke);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.subscription-navigation__menu > button {
+  justify-content: flex-start;
+}
+
+@media (max-width: 700px) {
+  .subscription-navigation__desktop {
+    display: none;
+  }
+
+  .subscription-navigation__mobile {
+    display: grid;
+    justify-items: start;
+    gap: 6px;
+  }
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
