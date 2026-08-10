@@ -1,6 +1,6 @@
 "use client";
 
-import { CreditCard, LoaderCircle, Mail, Settings2, ShieldCheck, ShieldX } from "lucide-react";
+import { CreditCard, LoaderCircle, Mail, Settings2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
@@ -8,7 +8,6 @@ import {
   getStoredBillingEntitlement,
   refreshBillingEntitlement,
   refreshBillingEntitlementIfNeeded,
-  saveBillingEntitlementToken,
 } from "@/lib/billing/entitlement-client";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -21,15 +20,6 @@ import type { StripeBillingPlan } from "@/lib/stripe/server";
 type Props = {
   plans: StripeBillingPlan[];
   planLoadError: string | null;
-};
-
-type RefreshPayload = {
-  entitlementToken: string;
-};
-
-type BillingDebugEntry = {
-  time: string;
-  message: string;
 };
 
 async function postJson<T>(
@@ -74,11 +64,6 @@ async function postJson<T>(
   }
 }
 
-function formatDate(value: string | null) {
-  if (!value) return null;
-  return new Date(value).toLocaleString();
-}
-
 function wait(milliseconds: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 }
@@ -93,16 +78,12 @@ export function BillingScreen({ plans, planLoadError }: Props) {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [entitlement, setEntitlement] = useState<BillingEntitlementPayload | null>(null);
   const [entitlementToken, setEntitlementToken] = useState<string | null>(null);
-  const [magicLinkPreviewUrl, setMagicLinkPreviewUrl] = useState<string | null>(null);
   const [loadingEntitlement, setLoadingEntitlement] = useState(true);
   const [billingError, setBillingError] = useState<string | null>(null);
-  const [debugEntries, setDebugEntries] = useState<BillingDebugEntry[]>([]);
-
   function addDebug(message: string) {
-    setDebugEntries((current) => [
-      ...current.slice(-39),
-      { time: new Date().toISOString(), message },
-    ]);
+    if (process.env.NODE_ENV !== "production") {
+      console.debug(`[BillingScreen] ${message}`);
+    }
   }
 
   useEffect(() => {
@@ -197,7 +178,6 @@ export function BillingScreen({ plans, planLoadError }: Props) {
         "/api/auth/magic-link/request",
         { email },
       );
-      setMagicLinkPreviewUrl(payload.previewUrl ?? null);
       push({
         title: payload.previewUrl
           ? "Magic link created. Use the preview link below."
@@ -207,31 +187,6 @@ export function BillingScreen({ plans, planLoadError }: Props) {
     } catch (error) {
       push({
         title: error instanceof Error ? error.message : "Could not send magic link.",
-        tone: "danger",
-      });
-    } finally {
-      setBusyAction(null);
-    }
-  }
-
-  async function handleRefreshEntitlement() {
-    if (!entitlementToken) return;
-    try {
-      setBusyAction("refresh");
-      const payload = await postJson<RefreshPayload>(
-        "/api/auth/entitlement/refresh",
-        undefined,
-        entitlementToken,
-      );
-      if (payload.entitlementToken) {
-        const refreshed = await saveBillingEntitlementToken(payload.entitlementToken);
-        setEntitlement(refreshed);
-        setEntitlementToken(payload.entitlementToken);
-        setEmail(refreshed.email);
-      }
-    } catch (error) {
-      push({
-        title: error instanceof Error ? error.message : "Could not refresh entitlement.",
         tone: "danger",
       });
     } finally {
@@ -333,8 +288,6 @@ export function BillingScreen({ plans, planLoadError }: Props) {
     push({ title: "Signed out on this device.", tone: "success" });
   }
 
-  const statusLabel = entitlement?.subscription_active ? "active" : "inactive";
-
   if (loadingEntitlement) {
     return (
       <main className="safe-viewport-page" style={{ display: "grid", placeItems: "center", padding: 24 }}>
@@ -387,172 +340,51 @@ export function BillingScreen({ plans, planLoadError }: Props) {
   return (
     <main className="app-shell page-grid">
       <AppNavigation />
-      <div>
-        <h1>Manage Subscription</h1>
-        <p style={{ color: "var(--muted)", margin: 0 }}>
-          {entitlement?.subscription_active
-            ? "Manage your active subscription through Stripe, including cancellation and payment details."
-            : "Subscribe to unlock paid access. Your subscription is managed securely through Stripe."}
-        </p>
-      </div>
-
-      {checkoutMessage ? (
-        <Card style={{ borderColor: "rgba(65, 105, 225, 0.24)", background: "rgba(65, 105, 225, 0.08)" }}>
-          {checkoutMessage}
-        </Card>
-      ) : null}
-
-      {billingError ? (
-        <Card style={{ borderColor: "rgba(166, 45, 39, 0.3)", background: "rgba(166, 45, 39, 0.08)", color: "#8c211d" }}>
-          {billingError}
-        </Card>
-      ) : null}
-
-      <Card style={{ display: "grid", gap: 16 }}>
-        {entitlement?.email ? (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <span style={{ color: "var(--muted)" }}>Signed in as <strong style={{ color: "var(--ink)" }}>{entitlement.email}</strong></span>
-            <Button variant="ghost" onClick={() => void handleSignOut()} disabled={busyAction !== null}>
-              <ShieldX size={18} /> Sign Out
-            </Button>
+      <Card style={{ display: "grid", gap: 20, maxWidth: 520 }}>
+        <div style={{ display: "flex", alignItems: "start", justifyContent: "space-between", gap: 16 }}>
+          <div style={{ display: "grid", gap: 6 }}>
+            <h1 style={{ margin: 0, fontSize: "clamp(1.5rem, 4vw, 2rem)" }}>Subscription</h1>
+            <span style={{ color: "var(--muted)", overflowWrap: "anywhere" }}>{entitlement.email}</span>
           </div>
-        ) : null}
-        <Input
-          id="billing-email"
-          type="email"
-          autoComplete="email"
-          label="Billing email"
-          placeholder="you@rooftapemeasure.com"
-          hint="Magic-link sign-in creates or reuses the tiny D1 billing identity for this email."
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <Button onClick={() => void handleSendMagicLink()} disabled={busyAction !== null || !email.trim()}>
-            {busyAction === "magic-link" ? <LoaderCircle size={18} /> : <Mail size={18} />}
-            Send Magic Link
+          <Button variant="ghost" onClick={() => void handleSignOut()} disabled={busyAction !== null}>
+            Sign out
           </Button>
-          <Button variant="secondary" onClick={() => void handleRefreshEntitlement()} disabled={busyAction !== null || !entitlementToken}>
-            {busyAction === "refresh" ? <LoaderCircle size={18} /> : <ShieldCheck size={18} />}
-            Refresh Entitlement
-          </Button>
-          {!entitlement?.email ? (
-            <Button variant="ghost" onClick={() => void handleSignOut()} disabled={busyAction !== null || !entitlementToken}>
-              <ShieldX size={18} /> Sign Out
-            </Button>
-          ) : null}
         </div>
-        {magicLinkPreviewUrl ? (
-          <Card style={{ padding: 14, borderRadius: 16, background: "rgba(65, 105, 225, 0.06)" }}>
-            <div style={{ display: "grid", gap: 8 }}>
-              <strong>Dev magic-link preview</strong>
-              <a href={magicLinkPreviewUrl} style={{ color: "var(--accent)", overflowWrap: "anywhere" }}>
-                {magicLinkPreviewUrl}
-              </a>
-            </div>
-          </Card>
-        ) : null}
-      </Card>
 
-      <Card style={{ display: "grid", gap: 12 }}>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center" }}>
-          <strong>Local paid-access state</strong>
-          <span className="chip">
-            {entitlement?.subscription_active ? <ShieldCheck size={16} /> : <ShieldX size={16} />}
-            {loadingEntitlement ? "loading" : statusLabel}
-          </span>
-        </div>
-        {entitlement ? (
-          <div style={{ display: "grid", gap: 6, color: "var(--muted)", fontSize: 14 }}>
-            <span>User ID: {entitlement.user_id}</span>
-            <span>Plan: {entitlement.plan ?? "none"}</span>
-            {entitlement.subscription_cancel_at ? (
-              <strong style={{ color: "var(--danger)" }}>
-                Canceled. Active until {formatDate(entitlement.subscription_cancel_at)}.
-              </strong>
-            ) : null}
-            <span>Issued: {formatDate(entitlement.issued_at)}</span>
-            <span>Expires: {formatDate(entitlement.expires_at)}</span>
+        {checkoutMessage ? (
+          <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>{checkoutMessage}</p>
+        ) : null}
+
+        {billingError ? (
+          <p role="alert" style={{ margin: 0, color: "var(--danger)", lineHeight: 1.5 }}>{billingError}</p>
+        ) : null}
+
+        {entitlement.subscription_active ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            <p style={{ margin: 0 }}>Your subscription is active.</p>
+            <Button type="button" variant="secondary" onClick={() => void handlePortal()} disabled={busyAction !== null}>
+              {busyAction === "portal" ? <LoaderCircle size={18} /> : <Settings2 size={18} />}
+              Manage or cancel subscription
+            </Button>
           </div>
         ) : (
-          <span style={{ color: "var(--muted)" }}>
-            No signed entitlement is stored locally yet.
-          </span>
+          <div style={{ display: "grid", gap: 12 }}>
+            <p style={{ margin: 0, color: "var(--muted)" }}>Choose a plan to continue.</p>
+            {planLoadError ? <p role="alert" style={{ margin: 0, color: "var(--danger)" }}>{planLoadError}</p> : null}
+            {plans.length === 0 ? (
+              <p style={{ margin: 0, color: "var(--muted)" }}>Subscriptions are temporarily unavailable.</p>
+            ) : (
+              plans.map((plan) => (
+                <Button key={plan.id} type="button" onClick={() => void handleCheckout(plan.id)} disabled={busyAction !== null}>
+                  {busyAction === plan.id ? <LoaderCircle size={18} /> : <CreditCard size={18} />}
+                  Subscribe to {plan.name}
+                </Button>
+              ))
+            )}
+          </div>
         )}
       </Card>
 
-      {planLoadError ? (
-        <Card style={{ display: "grid", gap: 8 }}>
-          <strong>Billing plans could not be loaded.</strong>
-          <span style={{ color: "var(--muted)" }}>{planLoadError}</span>
-        </Card>
-      ) : null}
-
-      <section className="projects-screen__list">
-        {plans.length === 0 ? (
-          <Card style={{ display: "grid", gap: 8 }}>
-            <strong>No billing plans are configured yet.</strong>
-            <span style={{ color: "var(--muted)" }}>
-              Add `STRIPE_BILLING_PLANS_JSON` in your Cloudflare variables or local env, then reload.
-            </span>
-          </Card>
-        ) : (
-          plans.map((plan) => (
-            <Card key={plan.id} style={{ display: "grid", gap: 14 }}>
-              <div style={{ display: "grid", gap: 6 }}>
-                <h2 style={{ margin: 0 }}>{plan.name}</h2>
-                <p style={{ margin: 0, color: "var(--muted)" }}>{plan.description}</p>
-                <span className="chip">Billed per {plan.interval}</span>
-              </div>
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                {entitlement?.subscription_active ? (
-                  <span style={{ color: "var(--muted)", alignSelf: "center", fontSize: 14 }}>
-                    You have an active subscription.
-                  </span>
-                ) : (
-                  <Button type="button" onClick={() => void handleCheckout(plan.id)} disabled={busyAction !== null}>
-                    {busyAction === plan.id ? <LoaderCircle size={18} /> : <CreditCard size={18} />}
-                    Subscribe
-                  </Button>
-                )}
-                {entitlement?.subscription_active ? (
-                  <Button type="button" variant="secondary" onClick={() => void handlePortal()} disabled={busyAction !== null}>
-                    {busyAction === "portal" ? <LoaderCircle size={18} /> : <Settings2 size={18} />}
-                    Cancel Subscription
-                  </Button>
-                ) : null}
-              </div>
-            </Card>
-          ))
-        )}
-      </section>
-
-      <Card style={{ display: "grid", gap: 10 }}>
-        <strong>Billing diagnostics</strong>
-        <span style={{ color: "var(--muted)", fontSize: 14 }}>
-          Safe UI trace: token values are never displayed. Reproduce the issue, then copy this log.
-        </span>
-        <pre
-          style={{
-            margin: 0,
-            padding: 12,
-            overflowX: "auto",
-            whiteSpace: "pre-wrap",
-            fontSize: 12,
-            lineHeight: 1.5,
-            background: "var(--surface-strong)",
-            borderRadius: 12,
-            userSelect: "text",
-          }}
-        >
-          {debugEntries.length > 0
-            ? debugEntries.map((entry) => `${entry.time} ${entry.message}`).join("\n")
-            : "No billing events recorded yet."}
-        </pre>
-        <span style={{ color: "var(--muted)", fontSize: 12 }}>
-          Current state: loading={String(loadingEntitlement)}, stateToken={entitlementToken ? "present" : "missing"}, busyAction={busyAction ?? "none"}, plans={plans.length}
-        </span>
-      </Card>
     </main>
   );
 }
