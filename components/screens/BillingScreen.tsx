@@ -68,6 +68,14 @@ function wait(milliseconds: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function formatSubscriptionEndDate(value: string) {
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+  });
+}
+
 export function BillingScreen({ plans, planLoadError }: Props) {
   const searchParams = useSearchParams();
   const checkoutSucceeded = searchParams.get("checkout") === "success";
@@ -361,7 +369,11 @@ export function BillingScreen({ plans, planLoadError }: Props) {
 
         {entitlement.subscription_active ? (
           <div style={{ display: "grid", gap: 12 }}>
-            <p style={{ margin: 0 }}>Your subscription is active.</p>
+            <p style={{ margin: 0 }}>
+              {entitlement.subscription_cancel_at
+                ? `Subscription ends on ${formatSubscriptionEndDate(entitlement.subscription_cancel_at)}.`
+                : "Your subscription is active."}
+            </p>
             <Button type="button" variant="secondary" onClick={() => void handlePortal()} disabled={busyAction !== null}>
               {busyAction === "portal" ? <LoaderCircle size={18} /> : <Settings2 size={18} />}
               Manage or cancel subscription
