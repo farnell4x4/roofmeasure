@@ -87,6 +87,7 @@ export function BillingScreen({ plans, planLoadError }: Props) {
   const searchParams = useSearchParams();
   const checkoutSucceeded = searchParams.get("checkout") === "success";
   const returnedFromPortal = searchParams.get("billing") === "returned";
+  const reachedProjectLimit = searchParams.get("paywall") === "project-limit";
   const { push } = useToast();
   const [email, setEmail] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -333,6 +334,55 @@ export function BillingScreen({ plans, planLoadError }: Props) {
   }
 
   const statusLabel = entitlement?.subscription_active ? "active" : "inactive";
+
+  if (loadingEntitlement) {
+    return (
+      <main className="safe-viewport-page" style={{ display: "grid", placeItems: "center", padding: 24 }}>
+        <p style={{ margin: 0, color: "var(--muted)" }}>Loading…</p>
+      </main>
+    );
+  }
+
+  if (!entitlement?.email) {
+    return (
+      <main className="safe-viewport-page" style={{ display: "grid", placeItems: "center", padding: 24 }}>
+        <section style={{ width: "min(420px, 100%)", display: "grid", gap: 20 }}>
+          <div style={{ display: "grid", gap: 8 }}>
+            <h1 style={{ margin: 0 }}>{reachedProjectLimit ? "Sign in to continue" : "Sign in"}</h1>
+            <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>
+              {reachedProjectLimit
+                ? "You’ve used your free project. Sign in to continue."
+                : "Enter your email and we’ll send you a secure sign-in link."}
+            </p>
+          </div>
+
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (email.trim()) void handleSendMagicLink();
+            }}
+            style={{ display: "grid", gap: 12 }}
+          >
+            <Input
+              id="billing-email"
+              type="email"
+              autoComplete="email"
+              autoFocus
+              label="Email address"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+            <Button type="submit" disabled={busyAction !== null || !email.trim()}>
+              {busyAction === "magic-link" ? <LoaderCircle size={18} /> : <Mail size={18} />}
+              Send sign-in link
+            </Button>
+          </form>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="app-shell page-grid">
