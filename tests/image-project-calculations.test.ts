@@ -23,7 +23,7 @@ function createImageProject(): ImageProject {
 }
 
 describe("image project totals", () => {
-  it("uses entered image-line lengths without applying the optional plane pitch", () => {
+  it("applies each plane pitch to its calibrated plan area", () => {
     const project = createImageProject()
     project.segments = [
       { id: "rake-a", type: "rake", start: { x: 0, y: 0 }, end: { x: 18, y: 0 }, lengthFeet: 18 },
@@ -39,11 +39,20 @@ describe("image project totals", () => {
     expect(totals.slopeAdjustedTotals.rake).toBe(36)
     expect(totals.totalMeasuredLength).toBe(166)
     expect(totals.totalPlanAreaSqFt).toBe(1170)
-    expect(totals.totalSlopeAreaSqFt).toBe(1170)
+    expect(totals.totalSlopeAreaSqFt).toBeCloseTo(1170 * Math.sqrt(1.25), 10)
     expect(totals.planeSquaresById.plane).toBeCloseTo(
-      11.7,
+      11.7 * Math.sqrt(1.25),
       10,
     )
+
+    project.planes[0].pitch = "12/12"
+    const steeperTotals = calculateImageProjectTotals(project)
+
+    expect(steeperTotals.totalSlopeAreaSqFt).toBeCloseTo(1170 * Math.sqrt(2), 10)
+    expect(steeperTotals.planeSquaresById.plane).toBeCloseTo(11.7 * Math.sqrt(2), 10)
+
+    project.planes[0].pitch = undefined
+    expect(calculateImageProjectTotals(project).totalSlopeAreaSqFt).toBe(1170)
   })
 
   it("keeps untyped image lines visible in the report total", () => {

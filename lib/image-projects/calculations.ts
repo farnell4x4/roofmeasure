@@ -1,5 +1,6 @@
 import { imagePointKey, type ImageMeasurementSegment, type ImageProject } from "@/types/image-projects"
 import type { ProjectCalculations } from "@/types/models"
+import { pitchFactor } from "@/lib/measurement/geometry"
 import { calculateNestedPlaneAreas } from "@/lib/measurement/plane-nesting"
 
 export type ImageProjectCalculations = ProjectCalculations & {
@@ -30,8 +31,8 @@ function pixelPolygonArea(points: Array<{ x: number; y: number }>) {
 /**
  * Image projects use entered line lengths as their source of truth. For a
  * completed plane, the image outline supplies its shape and each entered edge
- * calibrates that shape to feet. Those entered lengths already include slope,
- * so an optional pitch is displayed but never applied to image calculations.
+ * calibrates that shape to feet. The calibrated outline is plan area, so the
+ * entered plane pitch converts it to the roof's sloped area.
  */
 export function calculateImageProjectTotals(project: ImageProject): ImageProjectCalculations {
   const totals = emptyMeasurementTotals()
@@ -78,9 +79,11 @@ export function calculateImageProjectTotals(project: ImageProject): ImageProject
   const nestedPlanAreaById = calculateNestedPlaneAreas(calculatedPlaneRegions)
   for (const plane of calculatedPlaneRegions) {
     const planAreaSqFt = nestedPlanAreaById.get(plane.id) ?? plane.area
+    const sourcePlane = project.planes.find((candidate) => candidate.id === plane.id)
+    const slopeAreaSqFt = planAreaSqFt * pitchFactor(sourcePlane?.pitch ?? "0/12")
     totalPlanAreaSqFt += planAreaSqFt
-    totalSlopeAreaSqFt += planAreaSqFt
-    planeSquaresById[plane.id] = planAreaSqFt / 100
+    totalSlopeAreaSqFt += slopeAreaSqFt
+    planeSquaresById[plane.id] = slopeAreaSqFt / 100
   }
 
   let unassignedLength = 0
