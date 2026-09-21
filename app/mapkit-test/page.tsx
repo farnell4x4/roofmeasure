@@ -102,6 +102,7 @@ type PointActionMenuState = {
   point: MeasurementPoint
   anchor: DecisionAnchor
 }
+type FirstMeasurementMenuState = PointActionMenuState
 type PlanePitchMenuState = {
   planeId: string
   anchor: DecisionAnchor
@@ -414,6 +415,8 @@ function MapKitTestPage() {
     useState<MeasurementPoint | null>(null)
   const [pendingModeDecisionAnchor, setPendingModeDecisionAnchor] =
     useState<DecisionAnchor | null>(null)
+  const [firstMeasurementMenu, setFirstMeasurementMenu] =
+    useState<FirstMeasurementMenuState | null>(null)
   const [pointActionMenu, setPointActionMenu] =
     useState<PointActionMenuState | null>(null)
   const [planePitchMenu, setPlanePitchMenu] =
@@ -557,6 +560,7 @@ function MapKitTestPage() {
         setIsComeFromArmed(false)
         setPendingModeDecisionPoint(null)
         setPendingModeDecisionAnchor(null)
+        setFirstMeasurementMenu(null)
         setPointActionMenu(null)
         setPlanePitchMenu(null)
         setSuppressSuggestionsUntilTyping(false)
@@ -709,6 +713,7 @@ function MapKitTestPage() {
       setIsComeFromArmed(false)
       setPendingModeDecisionPoint(null)
       setPendingModeDecisionAnchor(null)
+      setFirstMeasurementMenu(null)
       setPointActionMenu(null)
       setPlanePitchMenu(null)
       resetSuperZoom()
@@ -807,6 +812,7 @@ function MapKitTestPage() {
     setIsComeFromArmed(false)
     setPendingModeDecisionPoint(null)
     setPendingModeDecisionAnchor(null)
+    setFirstMeasurementMenu(null)
     setPointActionMenu(null)
     setPlanePitchMenu(null)
     setSegmentTypeMenu(null)
@@ -1252,6 +1258,7 @@ function MapKitTestPage() {
     tappedCoordinate: MeasurementPoint,
     anchor: DecisionAnchor | null,
   ) {
+    setFirstMeasurementMenu(null)
     setPointActionMenu(null)
     setPlanePitchMenu(null)
     setSegmentTypeMenu(null)
@@ -1268,6 +1275,10 @@ function MapKitTestPage() {
       setIsComeFromArmed(false)
       setPendingModeDecisionPoint(null)
       setPendingModeDecisionAnchor(null)
+      setFirstMeasurementMenu({
+        point: tappedPoint,
+        anchor: anchor ?? { x: 24, y: 120 },
+      })
       return
     }
 
@@ -1354,6 +1365,36 @@ function MapKitTestPage() {
     const next = { ...current, pendingLineStart: decisionPoint }
     replaceMeasurementGeometry(next)
     persistMeasurementGeometry(next)
+  }
+
+  function startMeasuringFromFirstPoint() {
+    setFirstMeasurementMenu(null)
+  }
+
+  function setFirstPointAsProjectArea() {
+    const menu = firstMeasurementMenu
+    if (!menu) return
+
+    const location: PropertyLocation = {
+      formattedAddress: query.trim() || "Custom project area",
+      latitude: menu.point.latitude,
+      longitude: menu.point.longitude,
+    }
+    setSelectedPlace({
+      latitude: menu.point.latitude,
+      longitude: menu.point.longitude,
+    })
+    setFirstMeasurementMenu(null)
+    void saveProjectSnapshot({
+      location,
+      targetProjectId:
+        currentProjectIdRef.current ?? pendingProjectRef.current?.id ?? null,
+      projectEpoch: projectEpochRef.current,
+      debugReason: "address",
+    }).catch((error) => {
+      console.error("Project area save failed.", error)
+      setSearchMessage("Could not save this project area.")
+    })
   }
 
   function removeAnnotation(annotationRef: React.MutableRefObject<unknown>) {
@@ -1926,6 +1967,7 @@ function MapKitTestPage() {
 
   useEffect(() => {
     let cancelled = false
+    let satelliteReassertTimer: number | null = null
 
     async function run() {
       try {
@@ -1946,12 +1988,19 @@ function MapKitTestPage() {
         const span = new mapkit.CoordinateSpan(0.04, 0.04)
         const region = new mapkit.CoordinateRegion(center, span)
 
-        mapInstanceRef.current = new mapkit.Map(mapRef.current, {
+        const map = new mapkit.Map(mapRef.current, {
           region,
           showsCompass: "visible",
-          showsMapTypeControl: true,
-          mapType: mapkit.MapType?.Satellite,
+          showsMapTypeControl: false,
+          mapType: "satellite",
         })
+        map.mapType = "satellite"
+        mapInstanceRef.current = map
+        satelliteReassertTimer = window.setTimeout(() => {
+          if (!cancelled && mapInstanceRef.current === map) {
+            map.mapType = "satellite"
+          }
+        }, 1_000)
         setMapReady(true)
       } catch (error) {
         console.error("MapKit test page failed to initialize.", error)
@@ -1979,6 +2028,10 @@ function MapKitTestPage() {
       ) {
         window.clearTimeout(cameraSaveTimerRef.current)
         cameraSaveTimerRef.current = null
+      }
+      if (satelliteReassertTimer !== null) {
+        window.clearTimeout(satelliteReassertTimer)
+        satelliteReassertTimer = null
       }
       setMapReady(false)
       clearMeasurementVisuals()
@@ -3102,6 +3155,59 @@ function MapKitTestPage() {
             }}
           >
             Close
+          </button>
+        </div>
+      ) : null}
+      {firstMeasurementMenu ? (
+        <div
+          style={{
+            position: "absolute",
+            left:
+              firstMeasurementMenu.anchor.x > window.innerWidth - 220
+                ? firstMeasurementMenu.anchor.x - 200
+                : firstMeasurementMenu.anchor.x + 20,
+            top: Math.min(
+              Math.max(firstMeasurementMenu.anchor.y - 44, 12),
+              window.innerHeight - 150,
+            ),
+            zIndex: 3,
+            display: "grid",
+            gap: 8,
+            width: 180,
+            padding: 12,
+            borderRadius: 16,
+            background: "rgba(255, 255, 255, 0.97)",
+            border: "1px solid rgba(31, 37, 34, 0.12)",
+            boxShadow: "0 14px 50px rgba(20, 24, 22, 0.16)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={setFirstPointAsProjectArea}
+            style={{
+              border: 0,
+              borderRadius: 12,
+              padding: "10px 12px",
+              background: "#1f2522",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            Set as project area
+          </button>
+          <button
+            type="button"
+            onClick={startMeasuringFromFirstPoint}
+            style={{
+              border: 0,
+              borderRadius: 12,
+              padding: "10px 12px",
+              background: "rgba(31, 37, 34, 0.08)",
+              color: "#1f2522",
+              cursor: "pointer",
+            }}
+          >
+            Start measuring
           </button>
         </div>
       ) : null}

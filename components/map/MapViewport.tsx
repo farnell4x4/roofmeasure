@@ -87,8 +87,8 @@ export function MapViewport({
         const map = new mapkitWindow.mapkit.Map(mapRef.current, {
           region,
           showsCompass: "visible",
-          showsMapTypeControl: true,
-          mapType: mapkitWindow.mapkit.MapType.Satellite,
+          showsMapTypeControl: false,
+          mapType: "satellite",
         })
 
         mapInstanceRef.current = map
