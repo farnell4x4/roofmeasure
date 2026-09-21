@@ -411,7 +411,7 @@ function LineEditor({ segment, anchor, onClose, onChange }: { segment: ImageMeas
       <div role="group" aria-label="Line type" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 7 }}>
         {MEASUREMENT_TYPES.map((option) => {
           const selected = segment.type === option.type
-          return <button key={option.type} type="button" aria-pressed={selected} onClick={() => onChange({ type: option.type as MeasurementType })} style={{ ...buttonStyle, minWidth: 0, padding: "9px 10px", background: selected ? option.color : "rgba(31,37,34,.08)", color: selected ? "#fff" : "#1f2522", fontWeight: selected ? 700 : 600 }}>{option.label}</button>
+          return <button key={option.type} type="button" aria-pressed={selected} onClick={() => { onChange({ type: option.type as MeasurementType }); onClose() }} style={{ ...buttonStyle, minWidth: 0, padding: "9px 10px", background: selected ? option.color : "rgba(31,37,34,.08)", color: selected ? "#fff" : "#1f2522", fontWeight: selected ? 700 : 600 }}>{option.label}</button>
         })}
       </div>
     </div>
