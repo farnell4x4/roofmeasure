@@ -4,7 +4,7 @@ import { AppPreferences, Project, SCHEMA_VERSION } from "@/types/models"
 import { ImageProject, ImageProjectListItem } from "@/types/image-projects"
 
 const DB_NAME = "roofmeasure-db"
-const DB_VERSION = 6
+const DB_VERSION = 7
 const PROJECTS_STORE = "projects"
 const PREFERENCES_STORE = "preferences"
 const RECOVERY_STORE = "recovery"
@@ -27,11 +27,6 @@ type BillingEntitlementRecord = {
     issued_at: string
     expires_at: string
   }
-}
-
-type LocalTrialRecord = {
-  id: "current"
-  freeProjectUsed: boolean
 }
 
 type RecoveryEntry = {
@@ -69,6 +64,9 @@ async function getDatabase() {
       }
       if (oldVersion < 6) {
         database.createObjectStore(LOCAL_TRIAL_STORE, { keyPath: "id" })
+      }
+      if (oldVersion < 7 && database.objectStoreNames.contains(LOCAL_TRIAL_STORE)) {
+        database.deleteObjectStore(LOCAL_TRIAL_STORE)
       }
     },
   })
@@ -239,13 +237,5 @@ export const db = {
   async clearBillingEntitlement() {
     const database = await getDatabase()
     await database.delete(BILLING_ENTITLEMENT_STORE, "current")
-  },
-  async getLocalTrial() {
-    const database = await getDatabase()
-    return (await database.get(LOCAL_TRIAL_STORE, "current")) as LocalTrialRecord | undefined
-  },
-  async markFreeProjectUsed() {
-    const database = await getDatabase()
-    await database.put(LOCAL_TRIAL_STORE, { id: "current", freeProjectUsed: true } satisfies LocalTrialRecord)
   },
 }

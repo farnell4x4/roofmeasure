@@ -11,7 +11,7 @@ import { MEASUREMENT_TYPES } from "@/lib/measurement/constants"
 import { roundMeasurement } from "@/lib/measurement/rounding"
 import { formatRoofingSquares } from "@/lib/measurement/units"
 import { calculateImageProjectTotals } from "@/lib/image-projects/calculations"
-import { canCreateLocalProject, LOCAL_PROJECT_LIMIT_MESSAGE, recordLocalProjectCreated } from "@/lib/billing/local-access"
+import { canCreateLocalProject, LOCAL_PROJECT_LIMIT_MESSAGE } from "@/lib/billing/local-access"
 import type { MeasurementType } from "@/types/models"
 import { imagePointKey, type ImageMeasurementSegment, type ImagePoint, type ImageProject } from "@/types/image-projects"
 
@@ -245,10 +245,7 @@ function ImageProjectScreen() {
         }
         return readImageDimensions(file)
           .then(({ width, height }) => db.saveImageProject(createImageProject(file, width, height)))
-          .then(async (saved) => {
-            await recordLocalProjectCreated()
-            router.replace(`/image?projectId=${saved.id}`)
-          })
+          .then((saved) => router.replace(`/image?projectId=${saved.id}`))
       })
       .catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Could not create photo project."))
   }

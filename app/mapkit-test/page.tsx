@@ -53,7 +53,7 @@ import {
 } from "@/lib/measurement/calculations"
 import { detectRoofPlanes } from "@/lib/measurement/plane-detection"
 import { createImageProject, readImageDimensions } from "@/lib/image-projects/factory"
-import { canCreateLocalProject, LOCAL_PROJECT_LIMIT_MESSAGE, recordLocalProjectCreated } from "@/lib/billing/local-access"
+import { canCreateLocalProject, LOCAL_PROJECT_LIMIT_MESSAGE } from "@/lib/billing/local-access"
 import { AddressSuggestion } from "@/types/mapkit"
 import {
   EditableMeasurementPoint as MeasurementPoint,
@@ -403,7 +403,7 @@ function MapKitTestPage() {
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null)
   const [projectHydrated, setProjectHydrated] = useState(false)
   const [hasPersistedMapCamera, setHasPersistedMapCamera] = useState(false)
-  const [isSatelliteMapActive, setIsSatelliteMapActive] = useState(false)
+  const [isSatelliteMapActive, setIsSatelliteMapActive] = useState(true)
   const [measurementSegments, setMeasurementSegments] = useState<
     MeasurementSegment[]
   >([])
@@ -551,7 +551,7 @@ function MapKitTestPage() {
         setActiveSinglePitch("6/12")
         setQuery("")
         setSelectedPlace(null)
-        setIsSatelliteMapActive(false)
+        setIsSatelliteMapActive(true)
         setHasPersistedMapCamera(false)
         replaceMeasurementGeometry({ segments: [], pendingLineStart: null })
         setIsComeFromArmed(false)
@@ -712,7 +712,7 @@ function MapKitTestPage() {
       setPointActionMenu(null)
       setPlanePitchMenu(null)
       resetSuperZoom()
-      setIsSatelliteMapActive(false)
+      setIsSatelliteMapActive(true)
       setSelectedPlace(
         project.location
           ? {
@@ -997,7 +997,7 @@ function MapKitTestPage() {
   function prepareForAddressSelection() {
     restoreLocationAlertForUnavailableLocation()
     resetSuperZoom()
-    setIsSatelliteMapActive(false)
+    setIsSatelliteMapActive(true)
     mapCameraRef.current = null
     pendingMapCameraRestoreRef.current = null
     setHasPersistedMapCamera(false)
@@ -1168,10 +1168,6 @@ function MapKitTestPage() {
         throw new Error(
           "IndexedDB reread did not match the measurement geometry that was saved.",
         )
-      }
-
-      if (options?.startNewProject) {
-        await recordLocalProjectCreated()
       }
 
       if (projectEpoch !== projectEpochRef.current) return savedProject
@@ -1954,7 +1950,7 @@ function MapKitTestPage() {
           region,
           showsCompass: "visible",
           showsMapTypeControl: true,
-          mapType: mapkit.MapType?.Standard,
+          mapType: mapkit.MapType?.Satellite,
         })
         setMapReady(true)
       } catch (error) {
@@ -2228,23 +2224,6 @@ function MapKitTestPage() {
     map.region = region
   }
 
-  function switchMapToSatelliteAfterSearch() {
-    window.setTimeout(() => {
-      const mapkit = window.mapkit
-      const map = mapInstanceRef.current
-      if (!mapkit || !map) return
-
-      map.mapType =
-        (
-          mapkit.Map as
-            { MapTypes?: { Satellite?: typeof map.mapType } } | undefined
-        )?.MapTypes?.Satellite ??
-        mapkit.MapType?.Satellite ??
-        map.mapType
-      setIsSatelliteMapActive(true)
-    }, 250)
-  }
-
   useEffect(() => {
     if (
       !mapReady ||
@@ -2271,8 +2250,6 @@ function MapKitTestPage() {
 
   useEffect(() => {
     if (!mapReady || !selectedPlace) return
-    switchMapToSatelliteAfterSearch()
-
     if (hasPersistedMapCamera || pendingMapCameraRestoreRef.current) return
     recenterMap(
       selectedPlace.latitude,
@@ -2417,7 +2394,6 @@ function MapKitTestPage() {
       const imageProject = await db.saveImageProject(
         createImageProject(file, width, height),
       )
-      await recordLocalProjectCreated()
       router.push(`/image?projectId=${encodeURIComponent(imageProject.id)}`)
     } catch (error) {
       setSearchState("error")

@@ -88,7 +88,7 @@ export function MapViewport({
           region,
           showsCompass: "visible",
           showsMapTypeControl: true,
-          mapType: mapkitWindow.mapkit.MapType.Standard,
+          mapType: mapkitWindow.mapkit.MapType.Satellite,
         })
 
         mapInstanceRef.current = map
